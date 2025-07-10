@@ -93,6 +93,8 @@ struct DuplicateDetailView: View {
             return file.id == group.selectedFileID
         case .keepAll:
             return true
+        case .deleteAll:
+            return false // No file is highlighted when deleting all
         }
     }
     

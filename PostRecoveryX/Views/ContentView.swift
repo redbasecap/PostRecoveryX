@@ -30,6 +30,12 @@ struct ContentView: View {
                 }
                 .tag("duplicates")
             
+            SimilarScenesView()
+                .tabItem {
+                    Label("Similar Scenes", systemImage: "rectangle.stack")
+                }
+                .tag("scenes")
+            
             ThumbnailManagementView()
                 .tabItem {
                     Label("Thumbnails", systemImage: "photo.stack")

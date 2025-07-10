@@ -17,6 +17,7 @@ final class ScannedFile {
     var height: Int?
     var cameraModel: String?
     var duplicateGroup: DuplicateGroup?
+    var similarSceneGroup: SimilarSceneGroup?
     var isProcessed: Bool
     var hasMetadata: Bool
     var error: String?

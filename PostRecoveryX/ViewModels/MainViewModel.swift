@@ -19,6 +19,7 @@ class MainViewModel: ObservableObject {
     private let duplicateChecker = DuplicateChecker()
     private let metadataParser = MetadataParser()
     private let folderOrganizer = FolderOrganizer()
+    private let sceneDetector = SceneDetector()
     
     private var modelContext: ModelContext?
     
@@ -91,13 +92,22 @@ class MainViewModel: ObservableObject {
             session.duplicatesFound = duplicateGroups.count
             session.totalSpaceSaved = duplicateGroups.reduce(0) { $0 + $1.potentialSpaceSaved }
             
+            // Step 4: Detect similar scenes
+            scanStatus = "Detecting similar scenes..."
+            scanProgress = 0.9
+            
+            let sceneGroups = try await sceneDetector.detectSimilarScenes(
+                in: files,
+                modelContext: modelContext
+            )
+            
             scanProgress = 1.0
             session.status = .completed
             session.endDate = Date()
             
             try modelContext.save()
             
-            scanStatus = "Scan complete! Found \(duplicateGroups.count) duplicate groups."
+            scanStatus = "Scan complete! Found \(duplicateGroups.count) duplicate groups and \(sceneGroups.count) scene groups."
             
         } catch {
             session.status = .failed
@@ -117,6 +127,7 @@ class MainViewModel: ObservableObject {
         await fileScanner.cancel()
         await duplicateChecker.cancel()
         await folderOrganizer.cancel()
+        await sceneDetector.cancel()
         
         if let session = currentSession {
             session.status = .cancelled

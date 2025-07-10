@@ -31,6 +31,7 @@ enum ResolutionAction: String, Codable, CaseIterable {
     case keepLargest = "Keep Largest"
     case keepSelected = "Keep Selected"
     case keepAll = "Keep All"
+    case deleteAll = "Delete All"
 }
 
 extension DuplicateGroup {

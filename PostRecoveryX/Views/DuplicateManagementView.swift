@@ -18,6 +18,7 @@ struct DuplicateManagementView: View {
     @State private var showingResults = false
     @State private var deletionResults: DeletionResults?
     @State private var globalResolutionAction: ResolutionAction?
+    @State private var showingWorkflowGuide = false
     
     var selectedGroupsCount: Int {
         selectedGroups.count
@@ -48,6 +49,14 @@ struct DuplicateManagementView: View {
                         .font(.largeTitle)
                         .bold()
                     
+                    Button(action: { showingWorkflowGuide = true }) {
+                        Image(systemName: "questionmark.circle")
+                            .font(.title2)
+                            .foregroundColor(.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show workflow guide")
+                    
                     Spacer()
                     
                     if selectedGroupsCount > 0 {
@@ -76,9 +85,22 @@ struct DuplicateManagementView: View {
                     
                     if selectedGroupsCount > 0 {
                         Menu("Apply Resolution to All") {
-                            ForEach(ResolutionAction.allCases.filter { $0 != .keepAll }, id: \.self) { action in
-                                Button(action.rawValue) {
-                                    applyGlobalResolution(action)
+                            Section("Keep Options") {
+                                ForEach(ResolutionAction.allCases.filter { $0 != .keepAll && $0 != .deleteAll }, id: \.self) { action in
+                                    Button(action.rawValue) {
+                                        applyGlobalResolution(action)
+                                    }
+                                }
+                            }
+                            
+                            Divider()
+                            
+                            Section("Danger Zone") {
+                                Button(action: {
+                                    applyGlobalResolution(.deleteAll)
+                                }) {
+                                    Label("Delete All Files", systemImage: "trash")
+                                        .foregroundColor(.red)
                                 }
                             }
                         }
@@ -127,7 +149,13 @@ struct DuplicateManagementView: View {
                                 onToggleSelection: { toggleGroupSelection(group) },
                                 onToggleExpansion: { toggleGroupExpansion(group) },
                                 onFileSelection: { fileID in
-                                    selectedFilesToKeep[group.id] = fileID
+                                    // If fileID is a new UUID (invalid), it means we're clearing selection for delete all
+                                    if group.files.contains(where: { $0.id == fileID }) {
+                                        selectedFilesToKeep[group.id] = fileID
+                                    } else {
+                                        // Clear selection for delete all
+                                        selectedFilesToKeep.removeValue(forKey: group.id)
+                                    }
                                 }
                             )
                         }
@@ -163,10 +191,22 @@ struct DuplicateManagementView: View {
                 performCleanup()
             }
         } message: {
-            Text("This will move \(calculateFilesToDelete()) files to the trash, recovering \(formattedSpaceSaved) of space. This action cannot be undone.")
+            let deleteCount = calculateFilesToDelete()
+            let hasDeleteAll = duplicateGroups
+                .filter { selectedGroups.contains($0.id) }
+                .contains { selectedFilesToKeep[$0.id] == nil }
+            
+            if hasDeleteAll {
+                Text("⚠️ WARNING: This will move \(deleteCount) files to the trash, recovering \(formattedSpaceSaved) of space. Some groups will have ALL files deleted. This action cannot be undone.")
+            } else {
+                Text("This will move \(deleteCount) files to the trash, recovering \(formattedSpaceSaved) of space. This action cannot be undone.")
+            }
         }
         .sheet(isPresented: $showingResults) {
             CleanupResultsView(results: deletionResults ?? DeletionResults())
+        }
+        .sheet(isPresented: $showingWorkflowGuide) {
+            DuplicateWorkflowGuide(showingGuide: $showingWorkflowGuide)
         }
     }
     
@@ -210,8 +250,10 @@ struct DuplicateManagementView: View {
         return duplicateGroups
             .filter { selectedGroups.contains($0.id) }
             .reduce(0) { total, group in
+                // If no file is selected to keep, all files will be deleted
                 let keepCount = selectedFilesToKeep[group.id] != nil ? 1 : 0
-                return total + max(0, group.files.count - keepCount)
+                let deleteCount = keepCount == 0 ? group.files.count : group.files.count - 1
+                return total + deleteCount
             }
     }
     
@@ -227,35 +269,57 @@ struct DuplicateManagementView: View {
             var processedFiles = 0
             
             for group in selectedGroupsList {
-                guard let fileToKeepID = selectedFilesToKeep[group.id] else { continue }
+                let fileToKeepID = selectedFilesToKeep[group.id]
                 
-                for file in group.files where file.id != fileToKeepID {
-                    processingStatus = "Deleting \(file.fileName)..."
+                if fileToKeepID == nil {
+                    // Delete all files in the group
+                    processingStatus = "Deleting all files in group..."
                     
-                    do {
-                        try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
-                        results.deletedFiles += 1
-                        results.spaceSaved += file.fileSize
+                    for file in group.files {
+                        do {
+                            try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+                            results.deletedFiles += 1
+                            results.spaceSaved += file.fileSize
+                            modelContext.delete(file)
+                        } catch {
+                            results.failedFiles += 1
+                            results.errors.append("\(file.fileName): \(error.localizedDescription)")
+                        }
                         
-                        // Remove from model
-                        modelContext.delete(file)
-                    } catch {
-                        results.failedFiles += 1
-                        results.errors.append("\(file.fileName): \(error.localizedDescription)")
+                        processedFiles += 1
+                        processingProgress = Double(processedFiles) / Double(totalFiles)
                     }
                     
-                    processedFiles += 1
-                    processingProgress = Double(processedFiles) / Double(totalFiles)
-                }
-                
-                // Update group
-                group.files.removeAll { $0.id != fileToKeepID }
-                group.fileCount = 1
-                group.isResolved = true
-                
-                // Remove group if only one file remains
-                if group.files.count <= 1 {
+                    // Delete the entire group
                     modelContext.delete(group)
+                } else {
+                    // Keep one file, delete others
+                    for file in group.files where file.id != fileToKeepID {
+                        processingStatus = "Deleting \(file.fileName)..."
+                        
+                        do {
+                            try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+                            results.deletedFiles += 1
+                            results.spaceSaved += file.fileSize
+                            modelContext.delete(file)
+                        } catch {
+                            results.failedFiles += 1
+                            results.errors.append("\(file.fileName): \(error.localizedDescription)")
+                        }
+                        
+                        processedFiles += 1
+                        processingProgress = Double(processedFiles) / Double(totalFiles)
+                    }
+                    
+                    // Update group
+                    group.files.removeAll { $0.id != fileToKeepID }
+                    group.fileCount = 1
+                    group.isResolved = true
+                    
+                    // Remove group if only one file remains
+                    if group.files.count <= 1 {
+                        modelContext.delete(group)
+                    }
                 }
             }
             
@@ -300,6 +364,9 @@ struct DuplicateManagementView: View {
             case .keepAll:
                 // Should not reach here as we filter this out in the menu
                 break
+            case .deleteAll:
+                // Mark all files for deletion (no file to keep)
+                selectedFilesToKeep.removeValue(forKey: groupID)
             }
         }
     }
@@ -360,20 +427,35 @@ struct DuplicateGroupCard: View {
                 HStack(spacing: 12) {
                     if isSelected && !group.isResolved {
                         Menu("Resolution") {
-                            ForEach(ResolutionAction.allCases, id: \.self) { action in
-                                Button(action.rawValue) {
-                                    group.resolutionAction = action
-                                    if action == .keepOldest {
-                                        onFileSelection(group.oldestFile?.id ?? group.files.first!.id)
-                                    } else if action == .keepNewest {
-                                        onFileSelection(group.newestFile?.id ?? group.files.first!.id)
-                                    } else if action == .keepLargest {
-                                        onFileSelection(group.largestFile?.id ?? group.files.first!.id)
-                                    } else if action == .keepAll {
-                                        // Deselect group if keeping all
-                                        onToggleSelection()
+                            Section("Keep Options") {
+                                ForEach(ResolutionAction.allCases.filter { $0 != .deleteAll }, id: \.self) { action in
+                                    Button(action.rawValue) {
+                                        group.resolutionAction = action
+                                        if action == .keepOldest {
+                                            onFileSelection(group.oldestFile?.id ?? group.files.first!.id)
+                                        } else if action == .keepNewest {
+                                            onFileSelection(group.newestFile?.id ?? group.files.first!.id)
+                                        } else if action == .keepLargest {
+                                            onFileSelection(group.largestFile?.id ?? group.files.first!.id)
+                                        } else if action == .keepAll {
+                                            // Deselect group if keeping all
+                                            onToggleSelection()
+                                        }
+                                        // keepSelected is handled by manual selection
                                     }
-                                    // keepSelected is handled by manual selection
+                                }
+                            }
+                            
+                            Divider()
+                            
+                            Section("Danger Zone") {
+                                Button(action: {
+                                    group.resolutionAction = .deleteAll
+                                    // Clear selection when deleting all
+                                    onFileSelection(UUID()) // Pass invalid UUID to clear selection
+                                }) {
+                                    Label("Delete All Files", systemImage: "trash")
+                                        .foregroundColor(.red)
                                 }
                             }
                         }
@@ -413,17 +495,23 @@ struct DuplicateGroupCard: View {
                     
                     if isSelected {
                         HStack {
-                            Text("Select file to keep:")
-                                .font(.headline)
+                            if group.resolutionAction == .deleteAll {
+                                Text("All files will be deleted")
+                                    .font(.headline)
+                                    .foregroundColor(.red)
+                            } else {
+                                Text("Select file to keep:")
+                                    .font(.headline)
+                            }
                             
                             if let action = group.resolutionAction {
                                 Spacer()
                                 Label(action.rawValue, systemImage: resolutionIcon(for: action))
                                     .font(.subheadline)
-                                    .foregroundColor(.accentColor)
+                                    .foregroundColor(action == .deleteAll ? .red : .accentColor)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 4)
-                                    .background(Color.accentColor.opacity(0.1))
+                                    .background(action == .deleteAll ? Color.red.opacity(0.1) : Color.accentColor.opacity(0.1))
                                     .cornerRadius(6)
                             }
                         }
@@ -440,18 +528,21 @@ struct DuplicateGroupCard: View {
                             FileSelectionCard(
                                 file: file,
                                 isSelected: isSelected && selectedFileID == file.id,
+                                isMarkedForDeletion: group.resolutionAction == .deleteAll,
                                 thumbnail: thumbnails[file.id]
                             ) {
-                                if isSelected {
-                                    onFileSelection(file.id)
-                                } else {
-                                    // First select the group, then the file
-                                    onToggleSelection()
-                                    onFileSelection(file.id)
+                                if group.resolutionAction != .deleteAll {
+                                    if isSelected {
+                                        onFileSelection(file.id)
+                                    } else {
+                                        // First select the group, then the file
+                                        onToggleSelection()
+                                        onFileSelection(file.id)
+                                    }
                                 }
                             }
-                            .disabled(!isSelected)
-                            .opacity(isSelected ? 1.0 : 0.7)
+                            .disabled(!isSelected || group.resolutionAction == .deleteAll)
+                            .opacity(isSelected && group.resolutionAction != .deleteAll ? 1.0 : 0.7)
                         }
                     }
                     .padding()
@@ -543,6 +634,8 @@ struct DuplicateGroupCard: View {
             return "hand.point.up"
         case .keepAll:
             return "checkmark.circle"
+        case .deleteAll:
+            return "trash"
         }
     }
 }
@@ -550,6 +643,7 @@ struct DuplicateGroupCard: View {
 struct FileSelectionCard: View {
     let file: ScannedFile
     let isSelected: Bool
+    var isMarkedForDeletion: Bool = false
     let thumbnail: NSImage?
     let onTap: () -> Void
     
@@ -569,7 +663,22 @@ struct FileSelectionCard: View {
                     ProgressView()
                 }
                 
-                if isSelected {
+                if isMarkedForDeletion {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.red, lineWidth: 4)
+                    
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "trash.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.red)
+                                .background(Circle().fill(.white))
+                                .padding(8)
+                        }
+                        Spacer()
+                    }
+                } else if isSelected {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.green, lineWidth: 4)
                     
@@ -620,9 +729,13 @@ struct FileSelectionCard: View {
             .padding(.horizontal, 4)
         }
         .padding(8)
-        .background(isSelected ? Color.green.opacity(0.1) : Color(NSColor.controlBackgroundColor))
+        .background(
+            isMarkedForDeletion ? Color.red.opacity(0.1) :
+            isSelected ? Color.green.opacity(0.1) :
+            Color(NSColor.controlBackgroundColor)
+        )
         .cornerRadius(12)
-        .shadow(radius: isSelected ? 4 : 2)
+        .shadow(radius: isSelected || isMarkedForDeletion ? 4 : 2)
         .onTapGesture(perform: onTap)
     }
 }

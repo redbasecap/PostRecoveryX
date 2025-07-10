@@ -86,6 +86,9 @@ actor FolderOrganizer {
                 }
             case .keepAll:
                 continue
+            case .deleteAll:
+                // When deleting all, there's no file to keep, so skip to next group
+                continue
             }
             
             guard let keepFile = fileToKeep else { continue }
