@@ -10,7 +10,7 @@ actor DuplicateChecker {
     private var isCancelled = false
     private var progress: Progress?
     
-    func findDuplicates(in files: [ScannedFile], modelContext: ModelContext) async throws -> [DuplicateGroup] {
+    func findDuplicates(in files: [ScannedFile], modelContext: ModelContext, enableVisualMatching: Bool = true) async throws -> [DuplicateGroup] {
         isCancelled = false
         progress = Progress(totalUnitCount: Int64(files.count))
         
@@ -28,7 +28,8 @@ actor DuplicateChecker {
                 file.isProcessed = true
                 
                 // Check if it's an image for perceptual hashing
-                if let uti = UTType(filenameExtension: URL(fileURLWithPath: file.path).pathExtension),
+                if enableVisualMatching,
+                   let uti = UTType(filenameExtension: URL(fileURLWithPath: file.path).pathExtension),
                    uti.conforms(to: .image) {
                     if let perceptualHash = try await computePerceptualHash(for: file) {
                         file.perceptualHash = perceptualHash.hash
@@ -72,8 +73,9 @@ actor DuplicateChecker {
         }
         
         // Process perceptual duplicates (including rotated images)
-        let processedPerceptual = Set<UUID>()
-        for i in 0..<perceptualGroups.count {
+        if enableVisualMatching && !perceptualGroups.isEmpty {
+            let processedPerceptual = Set<UUID>()
+            for i in 0..<perceptualGroups.count {
             let file1 = perceptualGroups[i]
             if processedPerceptual.contains(file1.id) || file1.duplicateGroup != nil {
                 continue
@@ -111,6 +113,7 @@ actor DuplicateChecker {
                 modelContext.insert(group)
                 duplicateGroups.append(group)
             }
+        }
         }
         
         try modelContext.save()

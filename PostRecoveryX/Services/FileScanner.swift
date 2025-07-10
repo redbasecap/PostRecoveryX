@@ -78,15 +78,19 @@ actor FileScanner {
                     .contentModificationDateKey
                 ])
                 
+                let fileSize = Int64(resourceValues.fileSize ?? 0)
                 let scannedFile = ScannedFile(
                     path: url.path,
                     fileName: url.lastPathComponent,
-                    fileSize: Int64(resourceValues.fileSize ?? 0),
+                    fileSize: fileSize,
                     fileType: resourceValues.contentType?.identifier ?? "unknown"
                 )
                 
                 scannedFile.creationDate = resourceValues.creationDate
                 scannedFile.modificationDate = resourceValues.contentModificationDate
+                
+                // Mark as thumbnail if it matches thumbnail criteria
+                scannedFile.isThumbnail = scannedFile.isPotentialThumbnail
                 
                 modelContext.insert(scannedFile)
                 scannedFiles.append(scannedFile)

@@ -13,6 +13,7 @@ class MainViewModel: ObservableObject {
     @Published var showError = false
     @Published var errorMessage = ""
     @Published var includeVideos = false
+    @Published var enableVisualMatching = false // Default to OFF to avoid false positives
     
     private let fileScanner = FileScanner()
     private let duplicateChecker = DuplicateChecker()
@@ -83,7 +84,8 @@ class MainViewModel: ObservableObject {
             
             let duplicateGroups = try await duplicateChecker.findDuplicates(
                 in: files,
-                modelContext: modelContext
+                modelContext: modelContext,
+                enableVisualMatching: enableVisualMatching
             )
             
             session.duplicatesFound = duplicateGroups.count
@@ -124,5 +126,24 @@ class MainViewModel: ObservableObject {
         
         isScanning = false
         scanStatus = "Scan cancelled"
+    }
+    
+    func continueSession(_ session: ScanSession) {
+        currentSession = session
+        scanPath = session.scanPath
+        
+        // Update UI to show session info
+        scanStatus = "Continuing previous scan..."
+        
+        // The duplicate groups and files are already in the database,
+        // so the DuplicateManagementView will show them automatically
+        
+        // Update session to mark it as viewed
+        session.status = .completed
+        if session.endDate == nil {
+            session.endDate = Date()
+        }
+        
+        try? modelContext?.save()
     }
 }

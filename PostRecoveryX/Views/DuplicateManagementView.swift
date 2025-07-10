@@ -1,6 +1,6 @@
 import SwiftUI
 import SwiftData
-import QuickLookThumbnailing
+import AppKit
 
 struct DuplicateManagementView: View {
     @Environment(\.modelContext) private var modelContext
@@ -17,6 +17,7 @@ struct DuplicateManagementView: View {
     @State private var processingStatus = ""
     @State private var showingResults = false
     @State private var deletionResults: DeletionResults?
+    @State private var globalResolutionAction: ResolutionAction?
     
     var selectedGroupsCount: Int {
         selectedGroups.count
@@ -39,9 +40,29 @@ struct DuplicateManagementView: View {
     }
     
     var body: some View {
-        NavigationView {
+        VStack(spacing: 0) {
+            // Header with toolbar
             VStack(spacing: 0) {
-                // Toolbar
+                HStack {
+                    Text("Duplicate Management")
+                        .font(.largeTitle)
+                        .bold()
+                    
+                    Spacer()
+                    
+                    if selectedGroupsCount > 0 {
+                        VStack(alignment: .trailing) {
+                            Text("\(selectedGroupsCount) groups selected")
+                                .font(.headline)
+                            Text("\(formattedSpaceSaved) to recover")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top)
+                
                 HStack {
                     Button("Select All") {
                         selectAll()
@@ -53,13 +74,19 @@ struct DuplicateManagementView: View {
                     }
                     .disabled(selectedGroups.isEmpty)
                     
-                    Spacer()
-                    
                     if selectedGroupsCount > 0 {
-                        Text("\(selectedGroupsCount) groups selected • \(formattedSpaceSaved) to recover")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Menu("Apply Resolution to All") {
+                            ForEach(ResolutionAction.allCases.filter { $0 != .keepAll }, id: \.self) { action in
+                                Button(action.rawValue) {
+                                    applyGlobalResolution(action)
+                                }
+                            }
+                        }
+                        .menuStyle(.borderedButton)
+                        .help("Apply the same resolution rule to all selected groups")
                     }
+                    
+                    Spacer()
                     
                     Button("Clean Up Selected") {
                         showingConfirmation = true
@@ -67,73 +94,79 @@ struct DuplicateManagementView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(selectedGroups.isEmpty || isProcessing)
                 }
-                .padding()
-                
-                Divider()
-                
-                // Main content
-                if duplicateGroups.isEmpty {
-                    VStack {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 60))
-                            .foregroundColor(.green)
-                        Text("No duplicates found")
-                            .font(.title2)
-                            .padding(.top)
-                        Text("Your image collection is already optimized!")
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(duplicateGroups) { group in
-                                DuplicateGroupRow(
-                                    group: group,
-                                    isSelected: selectedGroups.contains(group.id),
-                                    isExpanded: expandedGroups.contains(group.id),
-                                    selectedFileID: selectedFilesToKeep[group.id],
-                                    onToggleSelection: { toggleGroupSelection(group) },
-                                    onToggleExpansion: { toggleGroupExpansion(group) },
-                                    onFileSelection: { fileID in
-                                        selectedFilesToKeep[group.id] = fileID
-                                    }
-                                )
-                            }
-                        }
-                        .padding()
-                    }
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+            .background(Color(NSColor.windowBackgroundColor))
+            
+            Divider()
+            
+            // Main content
+            if duplicateGroups.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 80))
+                        .foregroundColor(.green)
+                    Text("No duplicates found")
+                        .font(.title)
+                        .bold()
+                    Text("Your image collection is already optimized!")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
                 }
-                
-                // Progress overlay
-                if isProcessing {
-                    VStack(spacing: 20) {
-                        ProgressView(value: processingProgress)
-                            .progressViewStyle(.linear)
-                            .frame(width: 300)
-                        
-                        Text(processingStatus)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 600), spacing: 20)], spacing: 20) {
+                        ForEach(duplicateGroups) { group in
+                            DuplicateGroupCard(
+                                group: group,
+                                isSelected: selectedGroups.contains(group.id),
+                                isExpanded: expandedGroups.contains(group.id),
+                                selectedFileID: selectedFilesToKeep[group.id],
+                                onToggleSelection: { toggleGroupSelection(group) },
+                                onToggleExpansion: { toggleGroupExpansion(group) },
+                                onFileSelection: { fileID in
+                                    selectedFilesToKeep[group.id] = fileID
+                                }
+                            )
+                        }
                     }
                     .padding()
-                    .background(Color(NSColor.controlBackgroundColor))
-                    .cornerRadius(12)
-                    .shadow(radius: 10)
                 }
             }
-            .navigationTitle("Duplicate Management")
-            .alert("Confirm Cleanup", isPresented: $showingConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Clean Up", role: .destructive) {
-                    performCleanup()
-                }
-            } message: {
-                Text("This will move \(calculateFilesToDelete()) files to the trash, recovering \(formattedSpaceSaved) of space. This action cannot be undone.")
+            
+            // Progress overlay
+            if isProcessing {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                    .overlay(
+                        VStack(spacing: 20) {
+                            ProgressView(value: processingProgress)
+                                .progressViewStyle(.linear)
+                                .frame(width: 400)
+                            
+                            Text(processingStatus)
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        .padding(40)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(20)
+                        .shadow(radius: 20)
+                    )
             }
-            .sheet(isPresented: $showingResults) {
-                CleanupResultsView(results: deletionResults ?? DeletionResults())
+        }
+        .alert("Confirm Cleanup", isPresented: $showingConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clean Up", role: .destructive) {
+                performCleanup()
             }
+        } message: {
+            Text("This will move \(calculateFilesToDelete()) files to the trash, recovering \(formattedSpaceSaved) of space. This action cannot be undone.")
+        }
+        .sheet(isPresented: $showingResults) {
+            CleanupResultsView(results: deletionResults ?? DeletionResults())
         }
     }
     
@@ -237,9 +270,42 @@ struct DuplicateManagementView: View {
             }
         }
     }
+    
+    private func applyGlobalResolution(_ action: ResolutionAction) {
+        globalResolutionAction = action
+        
+        for groupID in selectedGroups {
+            guard let group = duplicateGroups.first(where: { $0.id == groupID }) else { continue }
+            
+            group.resolutionAction = action
+            
+            switch action {
+            case .keepOldest:
+                if let oldestFile = group.oldestFile {
+                    selectedFilesToKeep[groupID] = oldestFile.id
+                }
+            case .keepNewest:
+                if let newestFile = group.newestFile {
+                    selectedFilesToKeep[groupID] = newestFile.id
+                }
+            case .keepLargest:
+                if let largestFile = group.largestFile {
+                    selectedFilesToKeep[groupID] = largestFile.id
+                }
+            case .keepSelected:
+                // Keep current selection or default to first file
+                if selectedFilesToKeep[groupID] == nil {
+                    selectedFilesToKeep[groupID] = group.files.first?.id
+                }
+            case .keepAll:
+                // Should not reach here as we filter this out in the menu
+                break
+            }
+        }
+    }
 }
 
-struct DuplicateGroupRow: View {
+struct DuplicateGroupCard: View {
     let group: DuplicateGroup
     let isSelected: Bool
     let isExpanded: Bool
@@ -250,22 +316,27 @@ struct DuplicateGroupRow: View {
     
     @State private var thumbnails: [UUID: NSImage] = [:]
     @State private var showingComparison = false
+    @State private var showingMetadataMerge = false
+    @State private var mergeRecommendation: MetadataMerger.MergeRecommendation?
+    
+    private let metadataMerger = MetadataMerger()
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Header
+        VStack(alignment: .leading, spacing: 0) {
+            // Card Header
             HStack {
                 Button(action: onToggleSelection) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .foregroundColor(isSelected ? .accentColor : .secondary)
-                        .imageScale(.large)
+                        .font(.title2)
                 }
                 .buttonStyle(.plain)
                 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("\(group.files.count) duplicate files")
-                            .font(.headline)
+                            .font(.title3)
+                            .bold()
                         if group.isPerceptualMatch {
                             Label("Visual match", systemImage: "rotate.right")
                                 .font(.caption)
@@ -276,60 +347,125 @@ struct DuplicateGroupRow: View {
                                 .cornerRadius(4)
                         }
                     }
-                    Text("Size: \(group.files.first?.formattedFileSize ?? "Unknown") each • Total savings: \(group.formattedSpaceSaved)")
-                        .font(.caption)
+                    Text("Size: \(group.files.first?.formattedFileSize ?? "Unknown") each")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
+                    Text("Total savings: \(group.formattedSpaceSaved)")
+                        .font(.subheadline)
+                        .foregroundColor(.blue)
                 }
                 
                 Spacer()
                 
-                Button(action: { showingComparison = true }) {
-                    Label("Compare", systemImage: "rectangle.split.2x1")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                
-                Button(action: onToggleExpansion) {
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            
-            // Expanded content
-            if isExpanded && isSelected {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Select file to keep:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                    
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(group.files) { file in
-                                FileSelectionCard(
-                                    file: file,
-                                    isSelected: selectedFileID == file.id,
-                                    thumbnail: thumbnails[file.id]
-                                ) {
-                                    onFileSelection(file.id)
+                HStack(spacing: 12) {
+                    if isSelected && !group.isResolved {
+                        Menu("Resolution") {
+                            ForEach(ResolutionAction.allCases, id: \.self) { action in
+                                Button(action.rawValue) {
+                                    group.resolutionAction = action
+                                    if action == .keepOldest {
+                                        onFileSelection(group.oldestFile?.id ?? group.files.first!.id)
+                                    } else if action == .keepNewest {
+                                        onFileSelection(group.newestFile?.id ?? group.files.first!.id)
+                                    } else if action == .keepLargest {
+                                        onFileSelection(group.largestFile?.id ?? group.files.first!.id)
+                                    } else if action == .keepAll {
+                                        // Deselect group if keeping all
+                                        onToggleSelection()
+                                    }
+                                    // keepSelected is handled by manual selection
                                 }
                             }
                         }
-                        .padding(.horizontal)
+                        .menuStyle(.borderedButton)
                     }
+                    
+                    Button(action: { showingComparison = true }) {
+                        Label("Compare", systemImage: "rectangle.split.2x1")
+                    }
+                    .buttonStyle(.bordered)
+                    
+                    if group.files.count == 2 && isSelected {
+                        Button(action: {
+                            mergeRecommendation = metadataMerger.recommendMerge(for: group)
+                            showingMetadataMerge = true
+                        }) {
+                            Label("Merge Metadata", systemImage: "arrow.triangle.merge")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("View metadata merge suggestions")
+                    }
+                    
+                    Button(action: onToggleExpansion) {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(.bottom, 8)
+            }
+            .padding()
+            .background(isSelected ? Color.accentColor.opacity(0.1) : Color(NSColor.controlBackgroundColor))
+            
+            // Expanded content with thumbnail grid
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    Divider()
+                    
+                    if isSelected {
+                        HStack {
+                            Text("Select file to keep:")
+                                .font(.headline)
+                            
+                            if let action = group.resolutionAction {
+                                Spacer()
+                                Label(action.rawValue, systemImage: resolutionIcon(for: action))
+                                    .font(.subheadline)
+                                    .foregroundColor(.accentColor)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                                    .background(Color.accentColor.opacity(0.1))
+                                    .cornerRadius(6)
+                            }
+                        }
+                        .padding(.horizontal)
+                    } else {
+                        Text("Select this group to choose which file to keep")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                    }
+                    
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
+                        ForEach(group.files) { file in
+                            FileSelectionCard(
+                                file: file,
+                                isSelected: isSelected && selectedFileID == file.id,
+                                thumbnail: thumbnails[file.id]
+                            ) {
+                                if isSelected {
+                                    onFileSelection(file.id)
+                                } else {
+                                    // First select the group, then the file
+                                    onToggleSelection()
+                                    onFileSelection(file.id)
+                                }
+                            }
+                            .disabled(!isSelected)
+                            .opacity(isSelected ? 1.0 : 0.7)
+                        }
+                    }
+                    .padding()
+                }
+                .background(Color(NSColor.windowBackgroundColor))
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
+        .cornerRadius(12)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
         )
+        .shadow(radius: isSelected ? 8 : 4)
         .onAppear {
             if isExpanded {
                 loadThumbnails()
@@ -343,29 +479,70 @@ struct DuplicateGroupRow: View {
         .sheet(isPresented: $showingComparison) {
             DuplicateComparisonView(group: group)
         }
+        .sheet(isPresented: $showingMetadataMerge) {
+            if let recommendation = mergeRecommendation {
+                MetadataMergeView(recommendation: recommendation, group: group)
+            }
+        }
     }
     
     private func loadThumbnails() {
-        let size = CGSize(width: 120, height: 120)
-        let scale = NSScreen.main?.backingScaleFactor ?? 1.0
+        let targetSize = CGSize(width: 150, height: 150)
         
         for file in group.files {
             guard thumbnails[file.id] == nil else { continue }
             
-            let request = QLThumbnailGenerator.Request(
-                fileAt: file.url,
-                size: size,
-                scale: scale,
-                representationTypes: .all
-            )
-            
-            QLThumbnailGenerator.shared.generateRepresentations(for: request) { thumbnail, type, error in
-                if let thumbnail = thumbnail {
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let image = NSImage(contentsOf: file.url) {
+                    let thumbnail = self.createThumbnail(from: image, targetSize: targetSize)
+                    
                     DispatchQueue.main.async {
-                        self.thumbnails[file.id] = thumbnail.nsImage
+                        self.thumbnails[file.id] = thumbnail
                     }
                 }
             }
+        }
+    }
+    
+    private func createThumbnail(from image: NSImage, targetSize: CGSize) -> NSImage {
+        let imageSize = image.size
+        guard imageSize.width > 0 && imageSize.height > 0 else { return image }
+        
+        let widthRatio = targetSize.width / imageSize.width
+        let heightRatio = targetSize.height / imageSize.height
+        let ratio = min(widthRatio, heightRatio)
+        
+        let newSize = CGSize(
+            width: imageSize.width * ratio,
+            height: imageSize.height * ratio
+        )
+        
+        let thumbnail = NSImage(size: newSize)
+        thumbnail.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(
+            in: NSRect(origin: .zero, size: newSize),
+            from: NSRect(origin: .zero, size: imageSize),
+            operation: .copy,
+            fraction: 1.0
+        )
+        thumbnail.unlockFocus()
+        
+        return thumbnail
+    }
+    
+    private func resolutionIcon(for action: ResolutionAction) -> String {
+        switch action {
+        case .keepOldest:
+            return "clock.badge.checkmark"
+        case .keepNewest:
+            return "clock.arrow.circlepath"
+        case .keepLargest:
+            return "arrow.up.circle"
+        case .keepSelected:
+            return "hand.point.up"
+        case .keepAll:
+            return "checkmark.circle"
         }
     }
 }
@@ -377,43 +554,75 @@ struct FileSelectionCard: View {
     let onTap: () -> Void
     
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(Color.gray.opacity(0.1))
-                    .frame(width: 120, height: 120)
+                    .aspectRatio(1, contentMode: .fit)
                 
                 if let thumbnail = thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 120, height: 120)
-                        .cornerRadius(6)
+                        .cornerRadius(8)
                 } else {
                     ProgressView()
-                        .scaleEffect(0.5)
                 }
                 
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.green, lineWidth: 3)
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.green, lineWidth: 4)
                     
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .background(Circle().fill(.white))
-                        .position(x: 105, y: 15)
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.green)
+                                .background(Circle().fill(.white))
+                                .padding(8)
+                        }
+                        Spacer()
+                    }
                 }
             }
             
-            Text(file.fileName)
-                .font(.caption2)
-                .lineLimit(1)
-                .frame(width: 120)
-            
-            Text(file.originalCreationDate?.formatted(date: .abbreviated, time: .omitted) ?? "No date")
-                .font(.caption2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(file.fileName)
+                    .font(.subheadline)
+                    .bold()
+                    .lineLimit(1)
+                
+                HStack {
+                    Text(file.formattedFileSize)
+                        .font(.caption)
+                    Spacer()
+                    if let date = file.originalCreationDate ?? file.creationDate {
+                        Text(date.formatted(date: .abbreviated, time: .omitted))
+                            .font(.caption)
+                    }
+                }
                 .foregroundColor(.secondary)
+                
+                if file.hasMetadata {
+                    Label("Has metadata", systemImage: "info.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+                
+                if let camera = file.cameraModel {
+                    Label(camera, systemImage: "camera")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 4)
         }
+        .padding(8)
+        .background(isSelected ? Color.green.opacity(0.1) : Color(NSColor.controlBackgroundColor))
+        .cornerRadius(12)
+        .shadow(radius: isSelected ? 4 : 2)
         .onTapGesture(perform: onTap)
     }
 }

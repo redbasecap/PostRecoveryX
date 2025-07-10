@@ -7,6 +7,14 @@ struct ContentView: View {
     @Query(sort: \ScanSession.startDate, order: .reverse) private var sessions: [ScanSession]
     @Query private var duplicateGroups: [DuplicateGroup]
     @State private var selectedTab = "scan"
+    @State private var showingSessionPrompt = false
+    @State private var hasCheckedForPreviousSession = false
+    
+    var lastIncompleteSession: ScanSession? {
+        sessions.first { session in
+            session.status == .scanning || session.status == .processing
+        }
+    }
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -22,6 +30,12 @@ struct ContentView: View {
                 }
                 .tag("duplicates")
             
+            ThumbnailManagementView()
+                .tabItem {
+                    Label("Thumbnails", systemImage: "photo.stack")
+                }
+                .tag("thumbnails")
+            
             OrganizationView()
                 .tabItem {
                     Label("Organize", systemImage: "folder.badge.gearshape")
@@ -36,7 +50,55 @@ struct ContentView: View {
         }
         .onAppear {
             viewModel.setModelContext(modelContext)
+            checkForPreviousSession()
         }
+        .alert("Continue Previous Session?", isPresented: $showingSessionPrompt) {
+            Button("Continue") {
+                if let session = lastIncompleteSession {
+                    viewModel.continueSession(session)
+                }
+            }
+            Button("Start Fresh", role: .destructive) {
+                if let session = lastIncompleteSession {
+                    clearIncompleteSession(session)
+                }
+            }
+        } message: {
+            if let session = lastIncompleteSession {
+                Text("Found an incomplete scan from \(session.scanPath).\nWould you like to continue where you left off?")
+            }
+        }
+    }
+    
+    private func checkForPreviousSession() {
+        guard !hasCheckedForPreviousSession else { return }
+        hasCheckedForPreviousSession = true
+        
+        if lastIncompleteSession != nil && !duplicateGroups.isEmpty {
+            showingSessionPrompt = true
+        }
+    }
+    
+    private func clearIncompleteSession(_ session: ScanSession) {
+        // Mark session as cancelled
+        session.status = .cancelled
+        session.endDate = Date()
+        
+        // Clear associated duplicate groups
+        for group in duplicateGroups {
+            modelContext.delete(group)
+        }
+        
+        // Clear scanned files from this session
+        if let files = try? modelContext.fetch(FetchDescriptor<ScannedFile>()) {
+            for file in files {
+                if file.duplicateGroup != nil {
+                    modelContext.delete(file)
+                }
+            }
+        }
+        
+        try? modelContext.save()
     }
 }
 
@@ -68,8 +130,12 @@ struct ScanView: View {
             }
             .padding(.horizontal, 40)
             
-            Toggle("Include video files", isOn: $viewModel.includeVideos)
-                .padding(.horizontal, 40)
+            HStack {
+                Toggle("Include video files", isOn: $viewModel.includeVideos)
+                Toggle("Visual similarity matching", isOn: $viewModel.enableVisualMatching)
+                    .help("Detects rotated or visually similar images")
+            }
+            .padding(.horizontal, 40)
             
             if viewModel.isScanning {
                 VStack(spacing: 10) {

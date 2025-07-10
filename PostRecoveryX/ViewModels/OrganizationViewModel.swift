@@ -8,6 +8,7 @@ class OrganizationViewModel: ObservableObject {
     @Published var outputPath: String = ""
     @Published var organizationMode: OrganizationMode = .byMonth
     @Published var fileAction: OrganizationAction = .copy
+    @Published var renameFilesWithDate = false
     @Published var isOrganizing = false
     @Published var organizationProgress: Double = 0.0
     @Published var organizationStatus: String = ""
@@ -97,10 +98,12 @@ class OrganizationViewModel: ObservableObject {
             let organizationPath = getOrganizationPath(for: file)
             let destinationDir = destinationRoot.appendingPathComponent(organizationPath)
             
+            let fileName = renameFilesWithDate ? getRenamedFileName(for: file) : file.fileName
+            
             let task = OrganizationTask(
                 sourcePath: file.path,
                 destinationPath: destinationDir.path,
-                fileName: file.fileName,
+                fileName: fileName,
                 action: fileAction
             )
             
@@ -127,6 +130,26 @@ class OrganizationViewModel: ObservableObject {
             let month = calendar.component(.month, from: date)
             let monthName = DateFormatter().monthSymbols[month - 1]
             return "\(year)/\(String(format: "%02d", month)) - \(monthName)/\(topFolder)"
+        }
+    }
+    
+    private func getRenamedFileName(for file: ScannedFile) -> String {
+        guard let date = file.originalCreationDate ?? file.creationDate else {
+            return file.fileName
+        }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let datePrefix = dateFormatter.string(from: date)
+        
+        let url = URL(fileURLWithPath: file.path)
+        let nameWithoutExtension = url.deletingPathExtension().lastPathComponent
+        let fileExtension = url.pathExtension
+        
+        if fileExtension.isEmpty {
+            return "\(datePrefix)_\(nameWithoutExtension)"
+        } else {
+            return "\(datePrefix)_\(nameWithoutExtension).\(fileExtension)"
         }
     }
     

@@ -74,6 +74,13 @@ actor MetadataParser {
         if file.originalCreationDate == nil && file.creationDate != nil {
             file.originalCreationDate = file.creationDate
         }
+        
+        // After parsing metadata, check if dimensions indicate a thumbnail
+        if let width = file.width, let height = file.height {
+            if width <= 200 || height <= 200 {
+                file.isThumbnail = true
+            }
+        }
     }
     
     private func parseVideoMetadata(for file: ScannedFile, at url: URL) async throws {

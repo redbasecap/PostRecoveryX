@@ -20,6 +20,7 @@ final class ScannedFile {
     var isProcessed: Bool
     var hasMetadata: Bool
     var error: String?
+    var isThumbnail: Bool
     
     init(path: String, fileName: String, fileSize: Int64, fileType: String) {
         self.id = UUID()
@@ -29,6 +30,7 @@ final class ScannedFile {
         self.fileType = fileType
         self.isProcessed = false
         self.hasMetadata = false
+        self.isThumbnail = false
     }
 }
 
@@ -41,6 +43,26 @@ extension ScannedFile {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: fileSize)
+    }
+    
+    var isPotentialThumbnail: Bool {
+        // Check file size (under 10KB is likely a thumbnail)
+        let sizeThreshold: Int64 = 10 * 1024 // 10KB
+        
+        // Check filename patterns
+        let thumbnailPatterns = ["thumb", "thumbnail", "tn_", "_tn", "small", "_s", "-s"]
+        let lowercaseFileName = fileName.lowercased()
+        let hasThumbPattern = thumbnailPatterns.contains { pattern in
+            lowercaseFileName.contains(pattern)
+        }
+        
+        // Check dimensions if available
+        var hasSmallDimensions = false
+        if let width = width, let height = height {
+            hasSmallDimensions = width <= 200 || height <= 200
+        }
+        
+        return fileSize <= sizeThreshold || hasThumbPattern || hasSmallDimensions
     }
     
     var suggestedOrganizationPath: String? {

@@ -16,14 +16,18 @@ struct SimpleImageView: View {
                     .scaledToFit()
             } else {
                 ProgressView()
-                    .onAppear {
-                        loadImage()
-                    }
             }
+        }
+        .onAppear {
+            loadImage()
+        }
+        .onChange(of: url) { oldValue, newValue in
+            loadImage()
         }
     }
     
     private func loadImage() {
+        image = nil  // Clear previous image
         DispatchQueue.global(qos: .userInitiated).async {
             if let nsImage = NSImage(contentsOf: url) {
                 DispatchQueue.main.async {
@@ -234,6 +238,7 @@ struct QuickLookPreview: View {
             // Image preview
             if !urls.isEmpty && currentIndex < urls.count {
                 SimpleImageView(url: urls[currentIndex])
+                    .id(currentIndex)  // Force view recreation on index change
                     .frame(minWidth: 800, minHeight: 600)
                     .background(Color.black.opacity(0.9))
             }

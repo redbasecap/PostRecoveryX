@@ -56,6 +56,9 @@ struct OrganizationView: View {
                         .pickerStyle(.segmented)
                         .frame(width: 200)
                     }
+                    
+                    Toggle("Rename files with date prefix", isOn: $viewModel.renameFilesWithDate)
+                        .help("Adds YYYY-MM-DD prefix to filenames based on creation date")
                 }
                 .padding()
             }

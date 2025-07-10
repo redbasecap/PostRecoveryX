@@ -7,21 +7,27 @@ struct PerceptualHash: Equatable {
     let hash: UInt64
     let rotations: [UInt64] // Hashes for 90°, 180°, 270° rotations
     
-    func matches(_ other: PerceptualHash, threshold: Int = 10) -> Bool {
+    func matches(_ other: PerceptualHash, threshold: Int = 3) -> Bool {
+        // Very strict threshold - 3 bits difference maximum (about 5% difference)
+        // This should only match nearly identical images or rotations
+        
         // Check original
         if hammingDistance(hash, other.hash) <= threshold {
             return true
         }
         
-        // Check against all rotations
+        // Only check rotations against the original (not rotation vs rotation)
+        // This prevents false positives from comparing different rotations
         for rotatedHash in rotations {
             if hammingDistance(rotatedHash, other.hash) <= threshold {
                 return true
             }
-            for otherRotated in other.rotations {
-                if hammingDistance(rotatedHash, otherRotated) <= threshold {
-                    return true
-                }
+        }
+        
+        // Check other's rotations against our original
+        for otherRotated in other.rotations {
+            if hammingDistance(hash, otherRotated) <= threshold {
+                return true
             }
         }
         
@@ -61,8 +67,12 @@ class ImageHasher {
     }
     
     private func computeHash(for ciImage: CIImage) async throws -> UInt64 {
-        // Resize to 9x8 for DCT
-        let resized = ciImage.transformed(by: CGAffineTransform(scaleX: 9.0 / ciImage.extent.width, y: 8.0 / ciImage.extent.height))
+        // Use 16x16 for better quality hash
+        let targetSize: CGFloat = 16
+        
+        // Calculate aspect-preserving scale
+        let scale = min(targetSize / ciImage.extent.width, targetSize / ciImage.extent.height)
+        let resized = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         
         // Convert to grayscale
         guard let grayscaleFilter = CIFilter(name: "CIColorControls") else {
@@ -75,73 +85,29 @@ class ImageHasher {
             throw ImageHashError.grayscaleConversionFailed
         }
         
-        // Get pixel data
-        var pixelData = [Float](repeating: 0, count: 72) // 9x8
-        let rect = CGRect(x: 0, y: 0, width: 9, height: 8)
+        // Get pixel data - using 16x16 for better accuracy
+        var pixelData = [Float](repeating: 0, count: 256) // 16x16
+        let rect = CGRect(x: 0, y: 0, width: 16, height: 16)
         
         context.render(grayscale, 
                       toBitmap: &pixelData,
-                      rowBytes: 9 * MemoryLayout<Float>.size,
+                      rowBytes: 16 * MemoryLayout<Float>.size,
                       bounds: rect,
                       format: .RGBAf,
                       colorSpace: CGColorSpaceCreateDeviceGray())
         
-        // Compute DCT
-        let dctValues = computeDCT(pixelData, width: 9, height: 8)
+        // Compute average directly without DCT for simpler, more reliable hash
+        let average = pixelData.reduce(0, +) / Float(pixelData.count)
         
-        // Extract top-left 8x8 (excluding DC component)
-        var sum: Float = 0
-        var values: [Float] = []
-        
-        for y in 0..<8 {
-            for x in 0..<8 {
-                if x == 0 && y == 0 { continue } // Skip DC component
-                let index = y * 9 + x
-                values.append(dctValues[index])
-                sum += dctValues[index]
-            }
-        }
-        
-        let average = sum / Float(values.count)
-        
-        // Generate hash
+        // Generate hash based on whether each pixel is above or below average
         var hash: UInt64 = 0
-        for (i, value) in values.enumerated() where i < 64 {
-            if value > average {
+        for i in 0..<min(64, pixelData.count) {
+            if pixelData[i] > average {
                 hash |= (1 << i)
             }
         }
         
         return hash
-    }
-    
-    private func computeDCT(_ input: [Float], width: Int, height: Int) -> [Float] {
-        var output = [Float](repeating: 0, count: width * height)
-        
-        let piOverWidth = Float.pi / Float(width)
-        let piOverHeight = Float.pi / Float(height)
-        
-        for u in 0..<width {
-            for v in 0..<height {
-                var sum: Float = 0
-                
-                for x in 0..<width {
-                    for y in 0..<height {
-                        let pixel = input[y * width + x]
-                        let cosX = cos(piOverWidth * (Float(x) + 0.5) * Float(u))
-                        let cosY = cos(piOverHeight * (Float(y) + 0.5) * Float(v))
-                        sum += pixel * cosX * cosY
-                    }
-                }
-                
-                let cu: Float = u == 0 ? 1.0 / sqrt(2.0) : 1.0
-                let cv: Float = v == 0 ? 1.0 / sqrt(2.0) : 1.0
-                let normalizationFactor = 2.0 / sqrt(Float(width * height))
-                output[v * width + u] = sum * cu * cv * normalizationFactor
-            }
-        }
-        
-        return output
     }
 }
 
