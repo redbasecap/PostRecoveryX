@@ -12,7 +12,10 @@ import SwiftData
 struct PostRecoveryXApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            ScannedFile.self,
+            DuplicateGroup.self,
+            OrganizationTask.self,
+            ScanSession.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -28,5 +31,6 @@ struct PostRecoveryXApp: App {
             ContentView()
         }
         .modelContainer(sharedModelContainer)
+        .windowResizability(.contentSize)
     }
 }
