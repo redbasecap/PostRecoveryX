@@ -12,6 +12,7 @@ final class DuplicateGroup {
     var isResolved: Bool
     var resolutionAction: ResolutionAction?
     var selectedFileID: UUID?
+    var isPerceptualMatch: Bool
     
     init(sha256Hash: String, fileSize: Int64) {
         self.id = UUID()
@@ -20,6 +21,7 @@ final class DuplicateGroup {
         self.fileCount = 0
         self.files = []
         self.isResolved = false
+        self.isPerceptualMatch = sha256Hash.hasPrefix("perceptual_")
     }
 }
 

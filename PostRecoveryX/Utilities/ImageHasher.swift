@@ -134,9 +134,10 @@ class ImageHasher {
                     }
                 }
                 
-                let cu = u == 0 ? 1.0 / sqrt(2.0) : 1.0
-                let cv = v == 0 ? 1.0 / sqrt(2.0) : 1.0
-                output[v * width + u] = sum * cu * cv * 2.0 / sqrt(Float(width * height))
+                let cu: Float = u == 0 ? 1.0 / sqrt(2.0) : 1.0
+                let cv: Float = v == 0 ? 1.0 / sqrt(2.0) : 1.0
+                let normalizationFactor = 2.0 / sqrt(Float(width * height))
+                output[v * width + u] = sum * cu * cv * normalizationFactor
             }
         }
         

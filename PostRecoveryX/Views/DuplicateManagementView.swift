@@ -249,6 +249,7 @@ struct DuplicateGroupRow: View {
     let onFileSelection: (UUID) -> Void
     
     @State private var thumbnails: [UUID: NSImage] = [:]
+    @State private var showingComparison = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -262,14 +263,31 @@ struct DuplicateGroupRow: View {
                 .buttonStyle(.plain)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(group.files.count) duplicate files")
-                        .font(.headline)
+                    HStack {
+                        Text("\(group.files.count) duplicate files")
+                            .font(.headline)
+                        if group.isPerceptualMatch {
+                            Label("Visual match", systemImage: "rotate.right")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.2))
+                                .cornerRadius(4)
+                        }
+                    }
                     Text("Size: \(group.files.first?.formattedFileSize ?? "Unknown") each • Total savings: \(group.formattedSpaceSaved)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
                 Spacer()
+                
+                Button(action: { showingComparison = true }) {
+                    Label("Compare", systemImage: "rectangle.split.2x1")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
                 
                 Button(action: onToggleExpansion) {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -321,6 +339,9 @@ struct DuplicateGroupRow: View {
             if newValue {
                 loadThumbnails()
             }
+        }
+        .sheet(isPresented: $showingComparison) {
+            DuplicateComparisonView(group: group)
         }
     }
     

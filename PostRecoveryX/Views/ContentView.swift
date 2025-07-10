@@ -22,6 +22,12 @@ struct ContentView: View {
                 }
                 .tag("duplicates")
             
+            OrganizationView()
+                .tabItem {
+                    Label("Organize", systemImage: "folder.badge.gearshape")
+                }
+                .tag("organize")
+            
             HistoryView(sessions: sessions)
                 .tabItem {
                     Label("History", systemImage: "clock")
