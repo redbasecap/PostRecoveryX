@@ -121,15 +121,29 @@ class OrganizationViewModel: ObservableObject {
         
         let calendar = Calendar.current
         let year = calendar.component(.year, from: date)
-        let topFolder = file.url.deletingLastPathComponent().lastPathComponent
         
-        switch organizationMode {
-        case .byYear:
-            return "\(year)/\(topFolder)"
-        case .byMonth:
-            let month = calendar.component(.month, from: date)
-            let monthName = DateFormatter().monthSymbols[month - 1]
-            return "\(year)/\(String(format: "%02d", month)) - \(monthName)/\(topFolder)"
+        // When renaming with date prefix, don't create subfolders for original folders
+        if renameFilesWithDate {
+            switch organizationMode {
+            case .byYear:
+                return "\(year)"
+            case .byMonth:
+                let month = calendar.component(.month, from: date)
+                let monthName = DateFormatter().monthSymbols[month - 1]
+                return "\(year)/\(String(format: "%02d", month)) - \(monthName)"
+            }
+        } else {
+            // Keep original behavior when not renaming
+            let topFolder = file.url.deletingLastPathComponent().lastPathComponent
+            
+            switch organizationMode {
+            case .byYear:
+                return "\(year)/\(topFolder)"
+            case .byMonth:
+                let month = calendar.component(.month, from: date)
+                let monthName = DateFormatter().monthSymbols[month - 1]
+                return "\(year)/\(String(format: "%02d", month)) - \(monthName)/\(topFolder)"
+            }
         }
     }
     
@@ -139,7 +153,7 @@ class OrganizationViewModel: ObservableObject {
         }
         
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.dateFormat = "yyyy-MM-dd_HHmmss"
         let datePrefix = dateFormatter.string(from: date)
         
         let url = URL(fileURLWithPath: file.path)

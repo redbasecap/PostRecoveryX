@@ -58,20 +58,32 @@ struct OrganizationView: View {
                     }
                     
                     Toggle("Rename files with date prefix", isOn: $viewModel.renameFilesWithDate)
-                        .help("Adds YYYY-MM-DD prefix to filenames based on creation date")
+                        .help("Adds YYYY-MM-DD_HHMMSS prefix to filenames and places files directly in date folders without original folder structure")
                 }
                 .padding()
             }
             .padding(.horizontal, 40)
             
-            if viewModel.organizationMode == .byMonth {
-                Text("Files will be organized into: Year/Month/OriginalFolder")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            if viewModel.renameFilesWithDate {
+                if viewModel.organizationMode == .byMonth {
+                    Text("Files will be organized into: Year/Month folders with date-time prefixed names")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Files will be organized into: Year folders with date-time prefixed names")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             } else {
-                Text("Files will be organized into: Year/OriginalFolder")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if viewModel.organizationMode == .byMonth {
+                    Text("Files will be organized into: Year/Month/OriginalFolder")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Files will be organized into: Year/OriginalFolder")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             
             if viewModel.isOrganizing {

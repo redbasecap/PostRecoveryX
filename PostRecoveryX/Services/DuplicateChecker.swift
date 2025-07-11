@@ -93,7 +93,12 @@ actor DuplicateChecker {
                 
                 guard let hash2 = perceptualHashCache[file2.path] else { continue }
                 
-                if hash1.matches(hash2) {
+                let matchResult = hash1.matches(hash2)
+                if matchResult.matches {
+                    // Store rotation info relative to the first file
+                    if let rotation = matchResult.rotation {
+                        file2.suggestedRotation = rotation
+                    }
                     similarFiles.append(file2)
                 }
             }

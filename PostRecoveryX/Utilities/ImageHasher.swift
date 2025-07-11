@@ -7,31 +7,32 @@ struct PerceptualHash: Equatable {
     let hash: UInt64
     let rotations: [UInt64] // Hashes for 90°, 180°, 270° rotations
     
-    func matches(_ other: PerceptualHash, threshold: Int = 3) -> Bool {
-        // Very strict threshold - 3 bits difference maximum (about 5% difference)
+    func matches(_ other: PerceptualHash, threshold: Int = 1) -> (matches: Bool, rotation: Int?) {
+        // Extremely strict threshold - 1 bit difference maximum
         // This should only match nearly identical images or rotations
         
         // Check original
         if hammingDistance(hash, other.hash) <= threshold {
-            return true
+            return (true, nil) // No rotation needed
         }
         
-        // Only check rotations against the original (not rotation vs rotation)
-        // This prevents false positives from comparing different rotations
-        for rotatedHash in rotations {
+        // Check our rotations against other's original
+        for (index, rotatedHash) in rotations.enumerated() {
             if hammingDistance(rotatedHash, other.hash) <= threshold {
-                return true
+                // This image needs to be rotated by (index + 1) * 90 degrees
+                return (true, (index + 1) * 90)
             }
         }
         
         // Check other's rotations against our original
-        for otherRotated in other.rotations {
+        for (index, otherRotated) in other.rotations.enumerated() {
             if hammingDistance(hash, otherRotated) <= threshold {
-                return true
+                // The other image is rotated, so we need negative rotation
+                return (true, -(index + 1) * 90)
             }
         }
         
-        return false
+        return (false, nil)
     }
     
     private func hammingDistance(_ a: UInt64, _ b: UInt64) -> Int {

@@ -405,13 +405,22 @@ struct DuplicateGroupCard: View {
                             .font(.title3)
                             .bold()
                         if group.isPerceptualMatch {
-                            Label("Visual match", systemImage: "rotate.right")
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.2))
-                                .cornerRadius(4)
+                            HStack(spacing: 4) {
+                                Label("Visual match", systemImage: "rotate.right")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                                
+                                // Show if any files have rotation suggestions
+                                if group.files.contains(where: { $0.suggestedRotation != nil }) {
+                                    Text("(rotation detected)")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange.opacity(0.8))
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.2))
+                            .cornerRadius(4)
                         }
                     }
                     Text("Size: \(group.files.first?.formattedFileSize ?? "Unknown") each")
@@ -659,6 +668,21 @@ struct FileSelectionCard: View {
                         .resizable()
                         .scaledToFit()
                         .cornerRadius(8)
+                        .overlay(
+                            // Rotation indicator
+                            Group {
+                                if let rotation = file.suggestedRotation {
+                                    VStack {
+                                        HStack {
+                                            Spacer()
+                                            RotationIndicator(rotation: rotation)
+                                                .padding(4)
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                            }
+                        )
                 } else {
                     ProgressView()
                 }

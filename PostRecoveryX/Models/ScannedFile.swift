@@ -22,6 +22,7 @@ final class ScannedFile {
     var hasMetadata: Bool
     var error: String?
     var isThumbnail: Bool
+    var suggestedRotation: Int? // Rotation in degrees (90, 180, 270, -90, -180, -270)
     
     init(path: String, fileName: String, fileSize: Int64, fileType: String) {
         self.id = UUID()
