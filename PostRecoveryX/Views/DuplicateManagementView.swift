@@ -19,6 +19,7 @@ struct DuplicateManagementView: View {
     @State private var deletionResults: DeletionResults?
     @State private var globalResolutionAction: ResolutionAction?
     @State private var showingWorkflowGuide = false
+    @State private var dataActor: DataActor?
     
     var selectedGroupsCount: Int {
         selectedGroups.count
@@ -208,6 +209,10 @@ struct DuplicateManagementView: View {
         .sheet(isPresented: $showingWorkflowGuide) {
             DuplicateWorkflowGuide(showingGuide: $showingWorkflowGuide)
         }
+        .onAppear {
+            let container = modelContext.container
+            dataActor = DataActor(modelContainer: container)
+        }
     }
     
     private func selectAll() {
@@ -263,6 +268,8 @@ struct DuplicateManagementView: View {
         processingStatus = "Preparing cleanup..."
         
         Task {
+            guard let dataActor = dataActor else { return }
+            
             var results = DeletionResults()
             let selectedGroupsList = duplicateGroups.filter { selectedGroups.contains($0.id) }
             let totalFiles = calculateFilesToDelete()
@@ -273,57 +280,61 @@ struct DuplicateManagementView: View {
                 
                 if fileToKeepID == nil {
                     // Delete all files in the group
-                    processingStatus = "Deleting all files in group..."
+                    await MainActor.run {
+                        processingStatus = "Deleting all files in group..."
+                    }
                     
                     for file in group.files {
                         do {
-                            try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+                            try await dataActor.deleteDuplicateFile(file)
                             results.deletedFiles += 1
                             results.spaceSaved += file.fileSize
-                            modelContext.delete(file)
                         } catch {
                             results.failedFiles += 1
                             results.errors.append("\(file.fileName): \(error.localizedDescription)")
                         }
                         
                         processedFiles += 1
-                        processingProgress = Double(processedFiles) / Double(totalFiles)
+                        await MainActor.run {
+                            processingProgress = Double(processedFiles) / Double(totalFiles)
+                        }
                     }
                     
                     // Delete the entire group
-                    modelContext.delete(group)
+                    try? await dataActor.deleteDuplicateGroup(group)
                 } else {
                     // Keep one file, delete others
+                    var filesToRemove: [ScannedFile] = []
+                    
                     for file in group.files where file.id != fileToKeepID {
-                        processingStatus = "Deleting \(file.fileName)..."
+                        await MainActor.run {
+                            processingStatus = "Deleting \(file.fileName)..."
+                        }
                         
                         do {
-                            try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+                            try await dataActor.deleteDuplicateFile(file)
                             results.deletedFiles += 1
                             results.spaceSaved += file.fileSize
-                            modelContext.delete(file)
+                            filesToRemove.append(file)
                         } catch {
                             results.failedFiles += 1
                             results.errors.append("\(file.fileName): \(error.localizedDescription)")
                         }
                         
                         processedFiles += 1
-                        processingProgress = Double(processedFiles) / Double(totalFiles)
+                        await MainActor.run {
+                            processingProgress = Double(processedFiles) / Double(totalFiles)
+                        }
                     }
                     
                     // Update group
-                    group.files.removeAll { $0.id != fileToKeepID }
-                    group.fileCount = 1
-                    group.isResolved = true
-                    
-                    // Remove group if only one file remains
-                    if group.files.count <= 1 {
-                        modelContext.delete(group)
-                    }
+                    try? await dataActor.updateDuplicateGroup(
+                        group,
+                        removeFiles: filesToRemove,
+                        markResolved: true
+                    )
                 }
             }
-            
-            try? modelContext.save()
             
             await MainActor.run {
                 isProcessing = false
@@ -401,25 +412,25 @@ struct DuplicateGroupCard: View {
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("\(group.files.count) duplicate files")
+                        Text("\(group.files.count) \(group.sha256Hash.hasPrefix("visual_") ? "visually similar" : "duplicate") files")
                             .font(.title3)
                             .bold()
-                        if group.isPerceptualMatch {
+                        if group.sha256Hash.hasPrefix("visual_") {
                             HStack(spacing: 4) {
-                                Label("Visual match", systemImage: "rotate.right")
+                                Label("Visual match", systemImage: "eye.fill")
                                     .font(.caption)
-                                    .foregroundColor(.orange)
+                                    .foregroundColor(.purple)
                                 
                                 // Show if any files have rotation suggestions
                                 if group.files.contains(where: { $0.suggestedRotation != nil }) {
                                     Text("(rotation detected)")
                                         .font(.caption2)
-                                        .foregroundColor(.orange.opacity(0.8))
+                                        .foregroundColor(.purple.opacity(0.8))
                                 }
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.2))
+                            .background(Color.purple.opacity(0.2))
                             .cornerRadius(4)
                         }
                     }

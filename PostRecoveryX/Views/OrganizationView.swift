@@ -57,32 +57,64 @@ struct OrganizationView: View {
                         .frame(width: 200)
                     }
                     
-                    Toggle("Rename files with date prefix", isOn: $viewModel.renameFilesWithDate)
-                        .help("Adds YYYY-MM-DD_HHMMSS prefix to filenames and places files directly in date folders without original folder structure")
+                    HStack {
+                        Text("File Naming:")
+                        Spacer()
+                        Picker("", selection: $viewModel.fileNamingMode) {
+                            ForEach(FileNamingMode.allCases, id: \.self) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 200)
+                    }
                 }
                 .padding()
             }
             .padding(.horizontal, 40)
             
-            if viewModel.renameFilesWithDate {
-                if viewModel.organizationMode == .byMonth {
-                    Text("Files will be organized into: Year/Month folders with date-time prefixed names")
-                        .font(.caption)
+            VStack(spacing: 8) {
+                switch viewModel.fileNamingMode {
+                case .keepOriginal:
+                    if viewModel.organizationMode == .byMonth {
+                        Text("Files will be organized into: Year/Month/OriginalFolder")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Files will be organized into: Year/OriginalFolder")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                case .datePrefix:
+                    if viewModel.organizationMode == .byMonth {
+                        Text("Files will be organized into: Year/Month folders")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Files will be organized into: Year folders")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Text("Example: 2024-03-15_143022_IMG_1234.jpg")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
-                } else {
-                    Text("Files will be organized into: Year folders with date-time prefixed names")
-                        .font(.caption)
+                        .italic()
+                    
+                case .fullRename:
+                    if viewModel.organizationMode == .byMonth {
+                        Text("Files will be organized into: Year/Month folders")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Files will be organized into: Year folders")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Text("Example: 2024-03-15_143022.jpg (adds hash if multiple files have same timestamp)")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
-                }
-            } else {
-                if viewModel.organizationMode == .byMonth {
-                    Text("Files will be organized into: Year/Month/OriginalFolder")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("Files will be organized into: Year/OriginalFolder")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .italic()
                 }
             }
             

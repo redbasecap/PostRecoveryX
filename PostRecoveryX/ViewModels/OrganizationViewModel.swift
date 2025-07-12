@@ -3,12 +3,18 @@ import SwiftUI
 import SwiftData
 import AppKit
 
+enum FileNamingMode: String, CaseIterable {
+    case keepOriginal = "Keep Original"
+    case datePrefix = "Add Date Prefix"
+    case fullRename = "Full Date Rename"
+}
+
 @MainActor
 class OrganizationViewModel: ObservableObject {
     @Published var outputPath: String = ""
     @Published var organizationMode: OrganizationMode = .byMonth
     @Published var fileAction: OrganizationAction = .copy
-    @Published var renameFilesWithDate = false
+    @Published var fileNamingMode: FileNamingMode = .keepOriginal
     @Published var isOrganizing = false
     @Published var organizationProgress: Double = 0.0
     @Published var organizationStatus: String = ""
@@ -18,6 +24,7 @@ class OrganizationViewModel: ObservableObject {
     
     private let folderOrganizer = FolderOrganizer()
     private var organizationTasks: [OrganizationTask] = []
+    private var dateCollisionTracker: [String: Int] = [:] // Track files with same timestamp
     
     func selectOutputFolder() {
         let panel = NSOpenPanel()
@@ -93,12 +100,20 @@ class OrganizationViewModel: ObservableObject {
         modelContext: ModelContext
     ) async throws -> [OrganizationTask] {
         var tasks: [OrganizationTask] = []
+        dateCollisionTracker.removeAll() // Reset collision tracker
         
-        for file in files {
+        // Sort files by date to ensure consistent naming
+        let sortedFiles = files.sorted { file1, file2 in
+            let date1 = file1.originalCreationDate ?? file1.creationDate ?? Date.distantPast
+            let date2 = file2.originalCreationDate ?? file2.creationDate ?? Date.distantPast
+            return date1 < date2
+        }
+        
+        for file in sortedFiles {
             let organizationPath = getOrganizationPath(for: file)
             let destinationDir = destinationRoot.appendingPathComponent(organizationPath)
             
-            let fileName = renameFilesWithDate ? getRenamedFileName(for: file) : file.fileName
+            let fileName = getFileName(for: file)
             
             let task = OrganizationTask(
                 sourcePath: file.path,
@@ -122,8 +137,8 @@ class OrganizationViewModel: ObservableObject {
         let calendar = Calendar.current
         let year = calendar.component(.year, from: date)
         
-        // When renaming with date prefix, don't create subfolders for original folders
-        if renameFilesWithDate {
+        // When using date-based naming, don't create subfolders for original folders
+        if fileNamingMode != .keepOriginal {
             switch organizationMode {
             case .byYear:
                 return "\(year)"
@@ -147,7 +162,18 @@ class OrganizationViewModel: ObservableObject {
         }
     }
     
-    private func getRenamedFileName(for file: ScannedFile) -> String {
+    private func getFileName(for file: ScannedFile) -> String {
+        switch fileNamingMode {
+        case .keepOriginal:
+            return file.fileName
+        case .datePrefix:
+            return getDatePrefixedFileName(for: file)
+        case .fullRename:
+            return getFullyRenamedFileName(for: file)
+        }
+    }
+    
+    private func getDatePrefixedFileName(for file: ScannedFile) -> String {
         guard let date = file.originalCreationDate ?? file.creationDate else {
             return file.fileName
         }
@@ -164,6 +190,42 @@ class OrganizationViewModel: ObservableObject {
             return "\(datePrefix)_\(nameWithoutExtension)"
         } else {
             return "\(datePrefix)_\(nameWithoutExtension).\(fileExtension)"
+        }
+    }
+    
+    private func getFullyRenamedFileName(for file: ScannedFile) -> String {
+        guard let date = file.originalCreationDate ?? file.creationDate else {
+            return file.fileName
+        }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd_HHmmss"
+        let dateString = dateFormatter.string(from: date)
+        
+        let url = URL(fileURLWithPath: file.path)
+        let fileExtension = url.pathExtension
+        
+        // Check for collisions with same timestamp
+        let baseKey = dateString
+        let count = dateCollisionTracker[baseKey] ?? 0
+        dateCollisionTracker[baseKey] = count + 1
+        
+        // If multiple files have same timestamp, add a hash suffix
+        if count > 0 {
+            // Use first 6 characters of SHA256 hash for uniqueness
+            let hashSuffix = String(file.sha256Hash?.prefix(6) ?? "\(count)")
+            if fileExtension.isEmpty {
+                return "\(dateString)_\(hashSuffix)"
+            } else {
+                return "\(dateString)_\(hashSuffix).\(fileExtension)"
+            }
+        } else {
+            // First file with this timestamp gets clean name
+            if fileExtension.isEmpty {
+                return dateString
+            } else {
+                return "\(dateString).\(fileExtension)"
+            }
         }
     }
     

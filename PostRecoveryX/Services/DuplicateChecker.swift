@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 actor DuplicateChecker {
     private var hashCache: [String: String] = [:]
     private var perceptualHashCache: [String: PerceptualHash] = [:]
+    private var enhancedHashCache: [String: EnhancedImageHash] = [:]
     private let imageHasher = ImageHasher()
+    private let enhancedHasher = EnhancedImageHasher()
     private var isCancelled = false
     private var progress: Progress?
     
@@ -27,12 +29,12 @@ actor DuplicateChecker {
                 file.sha256Hash = hash
                 file.isProcessed = true
                 
-                // Check if it's an image for perceptual hashing
+                // Check if it's an image for enhanced visual matching
                 if enableVisualMatching,
                    let uti = UTType(filenameExtension: URL(fileURLWithPath: file.path).pathExtension),
                    uti.conforms(to: .image) {
-                    if let perceptualHash = try await computePerceptualHash(for: file) {
-                        file.perceptualHash = perceptualHash.hash
+                    if let enhancedHash = try await computeEnhancedHash(for: file) {
+                        file.perceptualHash = enhancedHash.perceptualHash.hash
                         perceptualGroups.append(file)
                     }
                 }
@@ -72,53 +74,60 @@ actor DuplicateChecker {
             duplicateGroups.append(group)
         }
         
-        // Process perceptual duplicates (including rotated images)
+        // Process visual duplicates with enhanced matching
         if enableVisualMatching && !perceptualGroups.isEmpty {
-            let processedPerceptual = Set<UUID>()
+            let processedPerceptual = NSMutableSet()
             for i in 0..<perceptualGroups.count {
-            let file1 = perceptualGroups[i]
-            if processedPerceptual.contains(file1.id) || file1.duplicateGroup != nil {
-                continue
-            }
-            
-            guard let hash1 = perceptualHashCache[file1.path] else { continue }
-            
-            var similarFiles = [file1]
-            
-            for j in (i+1)..<perceptualGroups.count {
-                let file2 = perceptualGroups[j]
-                if processedPerceptual.contains(file2.id) || file2.duplicateGroup != nil {
+                let file1 = perceptualGroups[i]
+                if processedPerceptual.contains(file1.id) || file1.duplicateGroup != nil {
                     continue
                 }
                 
-                guard let hash2 = perceptualHashCache[file2.path] else { continue }
+                guard let hash1 = enhancedHashCache[file1.path] else { continue }
                 
-                let matchResult = hash1.matches(hash2)
-                if matchResult.matches {
-                    // Store rotation info relative to the first file
-                    if let rotation = matchResult.rotation {
-                        file2.suggestedRotation = rotation
+                var similarFiles = [file1]
+                var matchConfidences: [Float] = [1.0] // First file has 100% match with itself
+                
+                for j in (i+1)..<perceptualGroups.count {
+                    let file2 = perceptualGroups[j]
+                    if processedPerceptual.contains(file2.id) || file2.duplicateGroup != nil {
+                        continue
                     }
-                    similarFiles.append(file2)
+                    
+                    guard let hash2 = enhancedHashCache[file2.path] else { continue }
+                    
+                    let matchResult = hash1.matches(hash2)
+                    if matchResult.matches {
+                        // Store rotation info relative to the first file
+                        if let rotation = matchResult.rotation {
+                            file2.suggestedRotation = rotation
+                        }
+                        similarFiles.append(file2)
+                        matchConfidences.append(matchResult.confidence)
+                        processedPerceptual.add(file2.id)
+                    }
+                }
+                
+                if similarFiles.count > 1 {
+                    // Only create group if average confidence is high
+                    let avgConfidence = matchConfidences.reduce(0, +) / Float(matchConfidences.count)
+                    if avgConfidence > 0.8 {
+                        let group = DuplicateGroup(
+                            sha256Hash: "visual_\(UUID().uuidString)",
+                            fileSize: similarFiles.first?.fileSize ?? 0
+                        )
+                        group.files = similarFiles
+                        group.fileCount = similarFiles.count
+                        
+                        for file in similarFiles {
+                            file.duplicateGroup = group
+                        }
+                        
+                        modelContext.insert(group)
+                        duplicateGroups.append(group)
+                    }
                 }
             }
-            
-            if similarFiles.count > 1 {
-                let group = DuplicateGroup(
-                    sha256Hash: "perceptual_\(UUID().uuidString)",
-                    fileSize: similarFiles.first?.fileSize ?? 0
-                )
-                group.files = similarFiles
-                group.fileCount = similarFiles.count
-                
-                for file in similarFiles {
-                    file.duplicateGroup = group
-                }
-                
-                modelContext.insert(group)
-                duplicateGroups.append(group)
-            }
-        }
         }
         
         try modelContext.save()
@@ -183,9 +192,24 @@ actor DuplicateChecker {
         progress
     }
     
+    func computeEnhancedHash(for file: ScannedFile) async throws -> EnhancedImageHash? {
+        if let cachedHash = enhancedHashCache[file.path] {
+            return cachedHash
+        }
+        
+        let url = URL(fileURLWithPath: file.path)
+        guard let hash = try await enhancedHasher.computeEnhancedHash(for: url) else {
+            return nil
+        }
+        
+        enhancedHashCache[file.path] = hash
+        return hash
+    }
+    
     func clearCache() {
         hashCache.removeAll()
         perceptualHashCache.removeAll()
+        enhancedHashCache.removeAll()
     }
 }
 

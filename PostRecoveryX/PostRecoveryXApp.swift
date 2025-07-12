@@ -10,7 +10,9 @@ import SwiftData
 
 @main
 struct PostRecoveryXApp: App {
-    var sharedModelContainer: ModelContainer = {
+    let sharedModelContainer: ModelContainer
+    
+    init() {
         let schema = Schema([
             ScannedFile.self,
             DuplicateGroup.self,
@@ -18,31 +20,36 @@ struct PostRecoveryXApp: App {
             ScanSession.self,
             SimilarSceneGroup.self
         ])
+        
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
+        
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            self.sharedModelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            // If migration fails, delete the existing store and create a new one
-            print("Migration failed, attempting to delete existing store: \(error)")
+            // If creation fails, try to recover by deleting the store
+            print("Failed to create ModelContainer: \(error)")
+            print("Attempting to recover by deleting the store...")
             
             let url = modelConfiguration.url
-            try? FileManager.default.removeItem(at: url)
-            
-            // Also remove associated files
+            let fileManager = FileManager.default
             let walUrl = url.appendingPathExtension("wal")
             let shmUrl = url.appendingPathExtension("shm")
-            try? FileManager.default.removeItem(at: walUrl)
-            try? FileManager.default.removeItem(at: shmUrl)
             
-            // Try creating container again with fresh database
+            try? fileManager.removeItem(at: url)
+            try? fileManager.removeItem(at: walUrl)
+            try? fileManager.removeItem(at: shmUrl)
+            
+            print("Cleared corrupted database at: \(url.path)")
+            
+            // Try once more with a fresh database
             do {
-                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+                self.sharedModelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+                print("Successfully created new ModelContainer after cleanup")
             } catch {
-                fatalError("Could not create ModelContainer after cleanup: \(error)")
+                fatalError("Could not create ModelContainer even after cleanup: \(error)")
             }
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {

@@ -1,21 +1,12 @@
 import Foundation
 import UniformTypeIdentifiers
-import SwiftData
 
 actor FileScanner {
-    private let supportedImageTypes: Set<UTType> = [
-        .jpeg, .png, .heic, .heif, .tiff, .bmp, .gif, .webP,
-        .rawImage, .svg, .ico, .icns
-    ]
-    
-    private let supportedVideoTypes: Set<UTType> = [
-        .mpeg4Movie, .quickTimeMovie, .avi, .mpeg, .mpeg2Video
-    ]
-    
     private var isCancelled = false
     private var progress: Progress?
     
-    func scanDirectory(at url: URL, includeVideos: Bool = false) async throws -> [URL] {
+    // Scan ALL files, filtering will be done later
+    func scanDirectory(at url: URL, scanAllTypes: Bool = true) async throws -> [URL] {
         isCancelled = false
         var discoveredFiles: [URL] = []
         
@@ -44,12 +35,16 @@ actor FileScanner {
                 let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
                 
                 guard let isRegularFile = resourceValues.isRegularFile,
-                      isRegularFile,
-                      let contentType = resourceValues.contentType else {
+                      isRegularFile else {
                     continue
                 }
                 
-                if isSupported(contentType: contentType, includeVideos: includeVideos) {
+                // Include all regular files when scanning all types
+                if scanAllTypes {
+                    discoveredFiles.append(fileURL)
+                } else if let contentType = resourceValues.contentType,
+                         isImageOrVideo(contentType: contentType) {
+                    // Legacy mode: only images and videos
                     discoveredFiles.append(fileURL)
                 }
             } catch {
@@ -60,7 +55,7 @@ actor FileScanner {
         return discoveredFiles
     }
     
-    func createScannedFiles(from urls: [URL], in modelContext: ModelContext) async throws -> [ScannedFile] {
+    func createScannedFiles(from urls: [URL]) async throws -> [ScannedFile] {
         var scannedFiles: [ScannedFile] = []
         
         progress = Progress(totalUnitCount: Int64(urls.count))
@@ -92,7 +87,6 @@ actor FileScanner {
                 // Mark as thumbnail if it matches thumbnail criteria
                 scannedFile.isThumbnail = scannedFile.isPotentialThumbnail
                 
-                modelContext.insert(scannedFile)
                 scannedFiles.append(scannedFile)
                 
                 progress?.completedUnitCount += 1
@@ -101,7 +95,6 @@ actor FileScanner {
             }
         }
         
-        try modelContext.save()
         return scannedFiles
     }
     
@@ -113,18 +106,27 @@ actor FileScanner {
         progress
     }
     
-    private func isSupported(contentType: UTType, includeVideos: Bool) -> Bool {
-        for imageType in supportedImageTypes {
+    private func isImageOrVideo(contentType: UTType) -> Bool {
+        // Check if it's an image
+        let imageTypes: [UTType] = [
+            .jpeg, .png, .heic, .heif, .tiff, .bmp, .gif, .webP,
+            .rawImage, .svg, .ico, .icns
+        ]
+        
+        for imageType in imageTypes {
             if contentType.conforms(to: imageType) {
                 return true
             }
         }
         
-        if includeVideos {
-            for videoType in supportedVideoTypes {
-                if contentType.conforms(to: videoType) {
-                    return true
-                }
+        // Check if it's a video
+        let videoTypes: [UTType] = [
+            .mpeg4Movie, .quickTimeMovie, .avi, .mpeg, .mpeg2Video
+        ]
+        
+        for videoType in videoTypes {
+            if contentType.conforms(to: videoType) {
+                return true
             }
         }
         

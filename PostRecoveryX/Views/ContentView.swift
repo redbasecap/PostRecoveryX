@@ -48,7 +48,7 @@ struct ContentView: View {
                 }
                 .tag("organize")
             
-            HistoryView(sessions: sessions)
+            HistoryView()
                 .tabItem {
                     Label("History", systemImage: "clock")
                 }
@@ -61,17 +61,24 @@ struct ContentView: View {
         .alert("Continue Previous Session?", isPresented: $showingSessionPrompt) {
             Button("Continue") {
                 if let session = lastIncompleteSession {
-                    viewModel.continueSession(session)
+                    Task {
+                        await viewModel.continueSession(session)
+                        selectedTab = "scan"
+                    }
                 }
             }
-            Button("Start Fresh", role: .destructive) {
+            Button("Start Fresh", role: .cancel) {
                 if let session = lastIncompleteSession {
-                    clearIncompleteSession(session)
+                    Task {
+                        await clearIncompleteSession(session)
+                    }
                 }
             }
         } message: {
             if let session = lastIncompleteSession {
-                Text("Found an incomplete scan from \(session.scanPath).\nWould you like to continue where you left off?")
+                let scannedCount = session.totalFilesProcessed
+                let status = session.status == .scanning ? "scanning" : "processing"
+                Text("Found an incomplete \(status) session from:\n\(session.scanPath)\n\nProgress: \(scannedCount) files scanned\nStarted: \(session.startDate.formatted())\n\nWould you like to continue where you left off?")
             }
         }
     }
@@ -80,31 +87,15 @@ struct ContentView: View {
         guard !hasCheckedForPreviousSession else { return }
         hasCheckedForPreviousSession = true
         
-        if lastIncompleteSession != nil && !duplicateGroups.isEmpty {
+        if lastIncompleteSession != nil {
             showingSessionPrompt = true
         }
     }
     
-    private func clearIncompleteSession(_ session: ScanSession) {
-        // Mark session as cancelled
-        session.status = .cancelled
-        session.endDate = Date()
-        
-        // Clear associated duplicate groups
-        for group in duplicateGroups {
-            modelContext.delete(group)
-        }
-        
-        // Clear scanned files from this session
-        if let files = try? modelContext.fetch(FetchDescriptor<ScannedFile>()) {
-            for file in files {
-                if file.duplicateGroup != nil {
-                    modelContext.delete(file)
-                }
-            }
-        }
-        
-        try? modelContext.save()
+    private func clearIncompleteSession(_ session: ScanSession) async {
+        let container = modelContext.container
+        let dataActor = DataActor(modelContainer: container)
+        try? await dataActor.clearIncompleteSession(session)
     }
 }
 
@@ -136,10 +127,12 @@ struct ScanView: View {
             }
             .padding(.horizontal, 40)
             
-            HStack {
-                Toggle("Include video files", isOn: $viewModel.includeVideos)
-                Toggle("Visual similarity matching", isOn: $viewModel.enableVisualMatching)
-                    .help("Detects rotated or visually similar images")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Scan all file types", isOn: $viewModel.scanAllFileTypes)
+                    .help("Scan all files and select types to process after scanning")
+                
+                Toggle("Visual similarity matching (experimental)", isOn: $viewModel.enableVisualMatching)
+                    .help("Detects rotated or visually similar images - may have false positives")
             }
             .padding(.horizontal, 40)
             
@@ -212,44 +205,59 @@ struct ScanView: View {
         } message: {
             Text(viewModel.errorMessage)
         }
+        .sheet(isPresented: $viewModel.showFileTypeSelection) {
+            FileTypeSelectionView(
+                onComplete: {
+                    await viewModel.processSelectedFileTypes()
+                }
+            )
+        }
     }
 }
 
 
 struct HistoryView: View {
-    let sessions: [ScanSession]
+    @Query(sort: \ScanSession.startDate, order: .reverse) private var sessions: [ScanSession]
     
     var body: some View {
-        List(sessions) { session in
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(session.scanPath)
-                        .font(.headline)
-                    Spacer()
-                    StatusBadge(status: session.status)
-                }
-                
-                HStack {
-                    Text("Started: \(session.startDate.formatted())")
-                    if let duration = session.formattedDuration {
-                        Text("• Duration: \(duration)")
+        NavigationStack {
+            if sessions.isEmpty {
+                ContentUnavailableView("No Scan History", 
+                                     systemImage: "clock",
+                                     description: Text("Your scan history will appear here"))
+            } else {
+                List(sessions) { session in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(session.scanPath)
+                                .font(.headline)
+                            Spacer()
+                            StatusBadge(status: session.status)
+                        }
+                        
+                        HStack {
+                            Text("Started: \(session.startDate.formatted())")
+                            if let duration = session.formattedDuration {
+                                Text("• Duration: \(duration)")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        
+                        HStack {
+                            Text("Files: \(session.totalFilesFound)")
+                            Text("• Duplicates: \(session.duplicatesFound)")
+                            if session.totalSpaceSaved > 0 {
+                                Text("• Saved: \(session.formattedSpaceSaved)")
+                            }
+                        }
+                        .font(.caption)
                     }
+                    .padding(.vertical, 4)
                 }
-                .font(.caption)
-                .foregroundColor(.secondary)
-                
-                HStack {
-                    Text("Files: \(session.totalFilesFound)")
-                    Text("• Duplicates: \(session.duplicatesFound)")
-                    if session.totalSpaceSaved > 0 {
-                        Text("• Saved: \(session.formattedSpaceSaved)")
-                    }
-                }
-                .font(.caption)
+                .navigationTitle("Scan History")
             }
-            .padding(.vertical, 4)
         }
-        .navigationTitle("Scan History")
     }
 }
 

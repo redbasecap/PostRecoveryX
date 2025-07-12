@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>top-level-items</key>
+	<array>
+		<dict>
+			<key>destination</key>
+			<dict>
+				<key>location-parameters</key>
+				<dict>
+					<key>EndingColumnNumber</key>
+					<string>0</string>
+					<key>EndingLineNumber</key>
+					<string>3</string>
+					<key>StartingColumnNumber</key>
+					<string>0</string>
+					<key>StartingLineNumber</key>
+					<string>2</string>
+					<key>Timestamp</key>
+					<string>773938566.831246</string>
+				</dict>
+				<key>rebasable-url</key>
+				<dict>
+					<key>payload</key>
+					<string>file:///var/folders/88/jtf5t2bx03n2rppbvdvbbwpc0000gn/T/swift-generated-sources/@__swiftmacro_13PostRecoveryX11ContentViewV8sessions33_150D2DD8F13B416550CCAAE411C943BDLL5QueryfMa_.swift</string>
+				</dict>
+			</dict>
+			<key>text-context</key>
+			<dict>
+				<key>focused</key>
+				<string>        _sessions.wrappedValue
+</string>
+				<key>leading</key>
+				<string>{
+    get {
+</string>
+				<key>trailing</key>
+				<string>    }
+}</string>
+			</dict>
+			<key>type</key>
+			<string>bookmark</string>
+		</dict>
+	</array>
+</dict>
+</plist>
