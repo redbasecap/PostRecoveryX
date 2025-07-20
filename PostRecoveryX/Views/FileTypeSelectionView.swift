@@ -3,7 +3,7 @@ import SwiftData
 
 struct FileTypeSelectionView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var filter = FileTypeFilter()
+    @StateObject private var filter: FileTypeFilter = FileTypeFilter()
     let onComplete: () async -> Void
     
     @Query private var scannedFiles: [ScannedFile]

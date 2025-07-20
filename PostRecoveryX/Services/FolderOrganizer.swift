@@ -80,6 +80,8 @@ actor FolderOrganizer {
                 fileToKeep = group.newestFile
             case .keepLargest:
                 fileToKeep = group.largestFile
+            case .keepBestQuality:
+                fileToKeep = group.bestQualityFile
             case .keepSelected:
                 if let selectedID = group.selectedFileID {
                     fileToKeep = group.files.first { $0.id == selectedID }

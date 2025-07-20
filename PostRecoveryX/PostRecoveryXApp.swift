@@ -18,7 +18,8 @@ struct PostRecoveryXApp: App {
             DuplicateGroup.self,
             OrganizationTask.self,
             ScanSession.self,
-            SimilarSceneGroup.self
+            SimilarSceneGroup.self,
+            PerformanceData.self
         ])
         
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)

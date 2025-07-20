@@ -29,6 +29,7 @@ enum ResolutionAction: String, Codable, CaseIterable {
     case keepOldest = "Keep Oldest"
     case keepNewest = "Keep Newest"
     case keepLargest = "Keep Largest"
+    case keepBestQuality = "Keep Best Quality"
     case keepSelected = "Keep Selected"
     case keepAll = "Keep All"
     case deleteAll = "Delete All"
@@ -56,5 +57,15 @@ extension DuplicateGroup {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: potentialSpaceSaved)
+    }
+    
+    var bestQualityFile: ScannedFile? {
+        // Return file with highest metadata quality score
+        files.max { $0.metadataQualityScore < $1.metadataQualityScore }
+    }
+    
+    var hasLowQualityFiles: Bool {
+        // Check if any files are likely thumbnails or low quality
+        files.contains { $0.isThumbnail || $0.isPotentialThumbnail || $0.metadataQualityScore < 30 }
     }
 }

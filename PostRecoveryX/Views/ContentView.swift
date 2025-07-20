@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var selectedTab = "scan"
     @State private var showingSessionPrompt = false
     @State private var hasCheckedForPreviousSession = false
+    @State private var showingPerformanceDashboard = false
     
     var lastIncompleteSession: ScanSession? {
         sessions.first { session in
@@ -24,7 +25,7 @@ struct ContentView: View {
                 }
                 .tag("scan")
             
-            DuplicateManagementView()
+            OptimizedDuplicateManagementView()
                 .tabItem {
                     Label("Duplicates", systemImage: "square.on.square")
                 }
@@ -95,7 +96,7 @@ struct ContentView: View {
     private func clearIncompleteSession(_ session: ScanSession) async {
         let container = modelContext.container
         let dataActor = DataActor(modelContainer: container)
-        try? await dataActor.clearIncompleteSession(session)
+        try? await dataActor.clearIncompleteSession(session.id)
     }
 }
 
@@ -137,14 +138,72 @@ struct ScanView: View {
             .padding(.horizontal, 40)
             
             if viewModel.isScanning {
-                VStack(spacing: 10) {
+                VStack(spacing: 16) {
+                    // Phase indicator with percentage
+                    HStack {
+                        HStack(spacing: 8) {
+                            Image(systemName: phaseIcon(for: viewModel.currentPhase))
+                                .font(.title2)
+                                .foregroundColor(.accentColor)
+                            
+                            Text(viewModel.currentPhase.rawValue)
+                                .font(.headline)
+                        }
+                        
+                        Spacer()
+                        
+                        // Performance dashboard button
+                        Button(action: { showingPerformanceDashboard = true }) {
+                            Label("Performance", systemImage: "chart.line.uptrend.xyaxis")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        // Percentage
+                        Text("\(viewModel.progressPercentage)%")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.accentColor)
+                    }
+                    .padding(.horizontal, 40)
+                    
+                    // Progress bar
                     ProgressView(value: viewModel.scanProgress)
                         .progressViewStyle(.linear)
                         .padding(.horizontal, 40)
                     
-                    Text(viewModel.scanStatus)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    // Time estimate
+                    if viewModel.estimatedTimeRemaining > 0 {
+                        HStack {
+                            Image(systemName: "clock")
+                                .foregroundColor(.secondary)
+                            Text("Estimated time remaining: \(formatTimeRemaining(viewModel.estimatedTimeRemaining))")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    // Status text
+                    VStack(spacing: 4) {
+                        Text(viewModel.scanStatus)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                        
+                        if !viewModel.currentFile.isEmpty {
+                            Text(viewModel.currentFile)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: 400)
+                        }
+                        
+                        if viewModel.totalFiles > 0 && viewModel.filesProcessed > 0 {
+                            Text("\(viewModel.filesProcessed) of \(viewModel.totalFiles) files")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                     
                     Button("Cancel") {
                         Task {
@@ -212,6 +271,36 @@ struct ScanView: View {
                 }
             )
         }
+        .sheet(isPresented: $showingPerformanceDashboard) {
+            PerformanceDashboardView()
+        }
+    }
+    
+    private func phaseIcon(for phase: ScanPhase) -> String {
+        switch phase {
+        case .idle:
+            return "circle"
+        case .discovering:
+            return "magnifyingglass"
+        case .creatingRecords:
+            return "doc.badge.plus"
+        case .extractingMetadata:
+            return "info.circle"
+        case .checkingDuplicates:
+            return "square.on.square"
+        case .detectingScenes:
+            return "rectangle.stack"
+        case .complete:
+            return "checkmark.circle"
+        }
+    }
+    
+    private func formatTimeRemaining(_ seconds: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.maximumUnitCount = 2
+        return formatter.string(from: seconds) ?? "calculating..."
     }
 }
 

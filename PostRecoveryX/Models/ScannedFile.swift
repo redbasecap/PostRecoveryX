@@ -76,4 +76,58 @@ extension ScannedFile {
         let topFolder = url.deletingLastPathComponent().lastPathComponent
         return "\(year)/\(String(format: "%02d", month)) - \(monthName)/\(topFolder)"
     }
+    
+    var metadataQualityScore: Int {
+        var score = 0
+        
+        // Base score for having the file
+        score += 10
+        
+        // Original creation date is most valuable (30 points)
+        if originalCreationDate != nil {
+            score += 30
+        } else if creationDate != nil {
+            score += 10
+        }
+        
+        // Camera model indicates original photo (20 points)
+        if cameraModel != nil {
+            score += 20
+        }
+        
+        // Dimensions indicate full resolution (15 points)
+        if let w = width, let h = height {
+            if w >= 3000 || h >= 3000 {
+                score += 15  // High resolution
+            } else if w >= 1920 || h >= 1920 {
+                score += 10  // Medium resolution
+            } else if w >= 1024 || h >= 1024 {
+                score += 5   // Low resolution
+            }
+        }
+        
+        // Having metadata at all (10 points)
+        if hasMetadata {
+            score += 10
+        }
+        
+        // File size bonus (larger usually = better quality)
+        if fileSize > 5_000_000 { // > 5MB
+            score += 10
+        } else if fileSize > 1_000_000 { // > 1MB
+            score += 5
+        }
+        
+        // Penalty for being identified as thumbnail
+        if isThumbnail || isPotentialThumbnail {
+            score -= 20
+        }
+        
+        // Penalty for having errors
+        if error != nil {
+            score -= 10
+        }
+        
+        return max(0, score) // Don't go below 0
+    }
 }

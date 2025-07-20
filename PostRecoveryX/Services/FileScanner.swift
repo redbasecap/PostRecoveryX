@@ -5,10 +5,18 @@ actor FileScanner {
     private var isCancelled = false
     private var progress: Progress?
     
+    // Progress callback
+    typealias ProgressCallback = (String, Int) -> Void
+    
     // Scan ALL files, filtering will be done later
-    func scanDirectory(at url: URL, scanAllTypes: Bool = true) async throws -> [URL] {
+    func scanDirectory(at url: URL, scanAllTypes: Bool = true, progressCallback: ProgressCallback? = nil) async throws -> [URL] {
         isCancelled = false
         var discoveredFiles: [URL] = []
+        
+        // Start performance monitoring for scanning phase
+        await MainActor.run {
+            PerformanceMonitor.shared.recordOperationStart("File Discovery")
+        }
         
         let resourceKeys: [URLResourceKey] = [
             .isRegularFileKey,
@@ -39,17 +47,38 @@ actor FileScanner {
                     continue
                 }
                 
+                let fileSize = resourceValues.fileSize ?? 0
+                
                 // Include all regular files when scanning all types
                 if scanAllTypes {
                     discoveredFiles.append(fileURL)
+                    // Record file processed for performance monitoring
+                    await MainActor.run {
+                        PerformanceMonitor.shared.recordFileProcessed(size: Int64(fileSize))
+                    }
                 } else if let contentType = resourceValues.contentType,
                          isImageOrVideo(contentType: contentType) {
                     // Legacy mode: only images and videos
                     discoveredFiles.append(fileURL)
+                    await MainActor.run {
+                        PerformanceMonitor.shared.recordFileProcessed(size: Int64(fileSize))
+                    }
+                }
+                
+                // Report progress
+                if let callback = progressCallback {
+                    await MainActor.run {
+                        callback(fileURL.lastPathComponent, discoveredFiles.count)
+                    }
                 }
             } catch {
                 continue
             }
+        }
+        
+        // Complete operation tracking
+        await MainActor.run {
+            PerformanceMonitor.shared.recordOperationComplete("File Discovery")
         }
         
         return discoveredFiles

@@ -41,6 +41,18 @@ struct DuplicateManagementView: View {
         return formatter.string(fromByteCount: potentialSpaceSaved)
     }
     
+    var availableCameras: Set<String> {
+        var cameras = Set<String>()
+        for group in duplicateGroups {
+            for file in group.files {
+                if let camera = file.cameraModel {
+                    cameras.insert(camera)
+                }
+            }
+        }
+        return cameras
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             // Header with toolbar
@@ -83,6 +95,52 @@ struct DuplicateManagementView: View {
                         selectNone()
                     }
                     .disabled(selectedGroups.isEmpty)
+                    
+                    Menu("Smart Select") {
+                        Button("Auto-select Best Quality") {
+                            autoSelectBestQuality()
+                        }
+                        
+                        Divider()
+                        
+                        Button("Select Groups with Thumbnails") {
+                            selectGroupsWithThumbnails()
+                        }
+                        
+                        Button("Select Groups without Metadata") {
+                            selectGroupsWithoutMetadata()
+                        }
+                        
+                        Button("Select Large Groups (5+ files)") {
+                            selectLargeGroups()
+                        }
+                        
+                        Divider()
+                        
+                        Menu("By File Size") {
+                            Button("Small Files (< 1MB)") {
+                                selectByFileSize(maxSize: 1_000_000)
+                            }
+                            Button("Medium Files (1-5MB)") {
+                                selectByFileSize(minSize: 1_000_000, maxSize: 5_000_000)
+                            }
+                            Button("Large Files (> 5MB)") {
+                                selectByFileSize(minSize: 5_000_000)
+                            }
+                        }
+                        
+                        if availableCameras.count > 0 {
+                            Menu("By Camera") {
+                                ForEach(Array(availableCameras).sorted(), id: \.self) { camera in
+                                    Button(camera) {
+                                        selectByCamera(camera)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .menuStyle(.borderedButton)
+                    .disabled(duplicateGroups.isEmpty)
                     
                     if selectedGroupsCount > 0 {
                         Menu("Apply Resolution to All") {
@@ -286,7 +344,7 @@ struct DuplicateManagementView: View {
                     
                     for file in group.files {
                         do {
-                            try await dataActor.deleteDuplicateFile(file)
+                            try await dataActor.deleteDuplicateFile(file.id)
                             results.deletedFiles += 1
                             results.spaceSaved += file.fileSize
                         } catch {
@@ -301,7 +359,7 @@ struct DuplicateManagementView: View {
                     }
                     
                     // Delete the entire group
-                    try? await dataActor.deleteDuplicateGroup(group)
+                    try? await dataActor.deleteDuplicateGroup(group.id)
                 } else {
                     // Keep one file, delete others
                     var filesToRemove: [ScannedFile] = []
@@ -312,7 +370,7 @@ struct DuplicateManagementView: View {
                         }
                         
                         do {
-                            try await dataActor.deleteDuplicateFile(file)
+                            try await dataActor.deleteDuplicateFile(file.id)
                             results.deletedFiles += 1
                             results.spaceSaved += file.fileSize
                             filesToRemove.append(file)
@@ -329,8 +387,8 @@ struct DuplicateManagementView: View {
                     
                     // Update group
                     try? await dataActor.updateDuplicateGroup(
-                        group,
-                        removeFiles: filesToRemove,
+                        group.id,
+                        removeFileIDs: filesToRemove.map { $0.id },
                         markResolved: true
                     )
                 }
@@ -367,6 +425,10 @@ struct DuplicateManagementView: View {
                 if let largestFile = group.largestFile {
                     selectedFilesToKeep[groupID] = largestFile.id
                 }
+            case .keepBestQuality:
+                if let bestFile = group.bestQualityFile {
+                    selectedFilesToKeep[groupID] = bestFile.id
+                }
             case .keepSelected:
                 // Keep current selection or default to first file
                 if selectedFilesToKeep[groupID] == nil {
@@ -378,6 +440,113 @@ struct DuplicateManagementView: View {
             case .deleteAll:
                 // Mark all files for deletion (no file to keep)
                 selectedFilesToKeep.removeValue(forKey: groupID)
+            }
+        }
+    }
+    
+    // MARK: - Smart Selection Methods
+    
+    private func autoSelectBestQuality() {
+        selectedGroups.removeAll()
+        selectedFilesToKeep.removeAll()
+        
+        for group in duplicateGroups {
+            selectedGroups.insert(group.id)
+            
+            // Automatically select the best quality file to keep
+            if let bestFile = group.bestQualityFile {
+                selectedFilesToKeep[group.id] = bestFile.id
+                group.resolutionAction = .keepSelected
+            } else {
+                // Fallback to oldest if no clear best
+                selectedFilesToKeep[group.id] = group.oldestFile?.id ?? group.files.first?.id
+                group.resolutionAction = .keepOldest
+            }
+        }
+    }
+    
+    private func selectGroupsWithThumbnails() {
+        selectedGroups.removeAll()
+        selectedFilesToKeep.removeAll()
+        
+        for group in duplicateGroups where group.hasLowQualityFiles {
+            selectedGroups.insert(group.id)
+            
+            // Auto-select best quality file (usually not the thumbnail)
+            if let bestFile = group.bestQualityFile {
+                selectedFilesToKeep[group.id] = bestFile.id
+            }
+        }
+    }
+    
+    private func selectGroupsWithoutMetadata() {
+        selectedGroups.removeAll()
+        selectedFilesToKeep.removeAll()
+        
+        for group in duplicateGroups {
+            let hasNoMetadata = group.files.allSatisfy { !$0.hasMetadata }
+            if hasNoMetadata {
+                selectedGroups.insert(group.id)
+                // Default to keeping the largest file when no metadata
+                selectedFilesToKeep[group.id] = group.largestFile?.id ?? group.files.first?.id
+            }
+        }
+    }
+    
+    private func selectLargeGroups() {
+        selectedGroups.removeAll()
+        selectedFilesToKeep.removeAll()
+        
+        for group in duplicateGroups where group.files.count >= 5 {
+            selectedGroups.insert(group.id)
+            
+            // For large groups, prefer best quality
+            if let bestFile = group.bestQualityFile {
+                selectedFilesToKeep[group.id] = bestFile.id
+            }
+        }
+    }
+    
+    private func selectByFileSize(minSize: Int64? = nil, maxSize: Int64? = nil) {
+        selectedGroups.removeAll()
+        selectedFilesToKeep.removeAll()
+        
+        for group in duplicateGroups {
+            let meetsSize = group.files.allSatisfy { file in
+                if let min = minSize, file.fileSize < min { return false }
+                if let max = maxSize, file.fileSize > max { return false }
+                return true
+            }
+            
+            if meetsSize {
+                selectedGroups.insert(group.id)
+                
+                // Auto-select best quality within size range
+                if let bestFile = group.bestQualityFile {
+                    selectedFilesToKeep[group.id] = bestFile.id
+                }
+            }
+        }
+    }
+    
+    private func selectByCamera(_ cameraModel: String) {
+        selectedGroups.removeAll()
+        selectedFilesToKeep.removeAll()
+        
+        for group in duplicateGroups {
+            let hasCamera = group.files.contains { $0.cameraModel == cameraModel }
+            if hasCamera {
+                selectedGroups.insert(group.id)
+                
+                // Prefer keeping files from the specified camera
+                if let cameraFile = group.files.first(where: { $0.cameraModel == cameraModel }) {
+                    selectedFilesToKeep[group.id] = cameraFile.id
+                } else {
+                    // Fallback to best quality
+                    if let bestFile = group.bestQualityFile {
+                        selectedFilesToKeep[group.id] = bestFile.id
+                    }
+                }
             }
         }
     }
@@ -457,6 +626,8 @@ struct DuplicateGroupCard: View {
                                             onFileSelection(group.newestFile?.id ?? group.files.first!.id)
                                         } else if action == .keepLargest {
                                             onFileSelection(group.largestFile?.id ?? group.files.first!.id)
+                                        } else if action == .keepBestQuality {
+                                            onFileSelection(group.bestQualityFile?.id ?? group.files.first!.id)
                                         } else if action == .keepAll {
                                             // Deselect group if keeping all
                                             onToggleSelection()
@@ -650,6 +821,8 @@ struct DuplicateGroupCard: View {
             return "clock.arrow.circlepath"
         case .keepLargest:
             return "arrow.up.circle"
+        case .keepBestQuality:
+            return "star.fill"
         case .keepSelected:
             return "hand.point.up"
         case .keepAll:
@@ -748,10 +921,15 @@ struct FileSelectionCard: View {
                 }
                 .foregroundColor(.secondary)
                 
-                if file.hasMetadata {
-                    Label("Has metadata", systemImage: "info.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(.green)
+                // Metadata quality indicator
+                HStack(spacing: 4) {
+                    MetadataQualityIndicator(score: file.metadataQualityScore)
+                    
+                    if file.isThumbnail || file.isPotentialThumbnail {
+                        Label("Thumbnail", systemImage: "photo.badge.minus")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
                 }
                 
                 if let camera = file.cameraModel {

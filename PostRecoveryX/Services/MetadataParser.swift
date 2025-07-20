@@ -14,6 +14,11 @@ actor MetadataParser {
     func parseMetadata(for file: ScannedFile) async throws {
         let url = URL(fileURLWithPath: file.path)
         
+        // Record metadata parsing start
+        await MainActor.run {
+            PerformanceMonitor.shared.recordOperationStart("Metadata Extraction")
+        }
+        
         guard let uti = UTType(filenameExtension: url.pathExtension) else {
             throw MetadataParserError.unsupportedFileType
         }
@@ -24,6 +29,11 @@ actor MetadataParser {
             try await parseVideoMetadata(for: file, at: url)
         } else {
             throw MetadataParserError.unsupportedFileType
+        }
+        
+        // Record metadata parsing complete
+        await MainActor.run {
+            PerformanceMonitor.shared.recordOperationComplete("Metadata Extraction")
         }
     }
     

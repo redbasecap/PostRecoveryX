@@ -16,6 +16,11 @@ actor DuplicateChecker {
         isCancelled = false
         progress = Progress(totalUnitCount: Int64(files.count))
         
+        // Start performance monitoring
+        await MainActor.run {
+            PerformanceMonitor.shared.recordOperationStart("Duplicate Detection")
+        }
+        
         var hashGroups: [String: [ScannedFile]] = [:]
         var perceptualGroups: [ScannedFile] = []
         
@@ -25,9 +30,20 @@ actor DuplicateChecker {
             }
             
             do {
+                // Record hash computation start
+                await MainActor.run {
+                    PerformanceMonitor.shared.recordOperationStart("Hash Computation")
+                }
+                
                 let hash = try await computeHash(for: file)
                 file.sha256Hash = hash
                 file.isProcessed = true
+                
+                // Record hash computation complete
+                await MainActor.run {
+                    PerformanceMonitor.shared.recordOperationComplete("Hash Computation")
+                    PerformanceMonitor.shared.recordFileProcessed(size: file.fileSize)
+                }
                 
                 // Check if it's an image for enhanced visual matching
                 if enableVisualMatching,
@@ -131,6 +147,12 @@ actor DuplicateChecker {
         }
         
         try modelContext.save()
+        
+        // Complete performance monitoring
+        await MainActor.run {
+            PerformanceMonitor.shared.recordOperationComplete("Duplicate Detection")
+        }
+        
         return duplicateGroups
     }
     

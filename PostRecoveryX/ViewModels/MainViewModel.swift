@@ -3,19 +3,39 @@ import SwiftUI
 import SwiftData
 import AppKit
 
+enum ScanPhase: String {
+    case idle = "Ready"
+    case discovering = "Discovering Files"
+    case creatingRecords = "Creating Records"
+    case extractingMetadata = "Extracting Metadata"
+    case checkingDuplicates = "Checking for Duplicates"
+    case detectingScenes = "Detecting Similar Scenes"
+    case complete = "Complete"
+}
+
 @MainActor
 class MainViewModel: ObservableObject {
     @Published var scanPath: String = ""
     @Published var isScanning = false
     @Published var scanProgress: Double = 0.0
     @Published var scanStatus: String = ""
-    @Published var currentSession: ScanSession?
+    @Published var currentSessionID: UUID?
     @Published var showError = false
     @Published var errorMessage = ""
     @Published var scanAllFileTypes = true
     @Published var enableVisualMatching = false // Default to OFF to avoid false positives
     @Published var showFileTypeSelection = false
-    @Published var fileTypeFilter = FileTypeFilter()
+    @Published var fileTypeFilter = SimpleFileTypeFilter()
+    
+    // Detailed progress tracking
+    @Published var currentFile: String = ""
+    @Published var currentPhase: ScanPhase = .idle
+    @Published var filesDiscovered: Int = 0
+    @Published var filesProcessed: Int = 0
+    @Published var totalFiles: Int = 0
+    @Published var scanStartTime: Date?
+    @Published var estimatedTimeRemaining: TimeInterval = 0
+    @Published var progressPercentage: Int = 0
     
     private let fileScanner = FileScanner()
     private let duplicateChecker = DuplicateChecker()
@@ -50,136 +70,214 @@ class MainViewModel: ObservableObject {
         
         isScanning = true
         scanProgress = 0.0
+        scanStartTime = Date()
+        progressPercentage = 0
+        estimatedTimeRemaining = 0
+        
+        // Start performance monitoring
+        PerformanceMonitor.shared.startMonitoring()
         
         do {
             // Create session using DataActor
-            let session = await dataActor.createSession(scanPath: scanPath)
-            currentSession = session
+            let sessionInfo = await dataActor.createSession(scanPath: scanPath)
+            currentSessionID = sessionInfo.id
             
+            currentPhase = .discovering
             scanStatus = "Discovering files..."
+            filesDiscovered = 0
+            
             let urls = try await fileScanner.scanDirectory(
                 at: URL(fileURLWithPath: scanPath),
                 scanAllTypes: scanAllFileTypes
-            )
+            ) { [weak self] fileName, count in
+                self?.currentFile = fileName
+                self?.filesDiscovered = count
+                self?.scanStatus = "Discovering files... (\(count) found)"
+                self?.updateTimeEstimates()
+            }
             
-            await dataActor.updateSession(session, totalFilesFound: urls.count)
-            scanStatus = "Found \(urls.count) files. Creating records..."
+            totalFiles = urls.count
+            try await dataActor.updateSession(id: sessionInfo.id, totalFilesFound: urls.count)
             
-            let files = try await dataActor.createScannedFiles(from: urls)
+            currentPhase = .creatingRecords
+            scanStatus = "Creating file records..."
+            updateTimeEstimates()
+            
+            let sessionID = sessionInfo.id
+            let files = try await fileScanner.createScannedFiles(from: urls)
+            try await dataActor.saveScannedFiles(files, sessionID: sessionID)
             
             // If scanning all types, show file type selection
             if scanAllFileTypes {
-                scanStatus = "Scan complete. Select file types to process..."
-                isScanning = false
-                showFileTypeSelection = true
+                // Extract file types from scanned files
+                let fileTypes = files.compactMap { $0.fileType }.reduce(into: Set<String>()) { $0.insert($1) }
+                
+                // Update file type filter with discovered types
+                await MainActor.run {
+                    self.fileTypeFilter = self.fileTypeFilter.updateDiscoveredTypes(Array(fileTypes))
+                    self.showFileTypeSelection = true
+                }
+                
+                // Wait for user selection
                 return
+            } else {
+                // Process immediately
+                try await processScannedFiles(sessionID: sessionID)
             }
-            
-            // Otherwise, process all files directly
-            try await processScannedFiles(files: files, session: session)
-            
         } catch {
-            if let session = currentSession {
-                await dataActor.updateSession(
-                    session,
-                    status: .failed,
-                    error: error.localizedDescription,
-                    endDate: Date()
-                )
-            }
-            
             errorMessage = error.localizedDescription
             showError = true
         }
         
         isScanning = false
-    }
-    
-    func cancelScan() async {
-        await fileScanner.cancel()
-        await duplicateChecker.cancel()
-        await folderOrganizer.cancel()
-        await sceneDetector.cancel()
-        
-        if let session = currentSession, let dataActor = dataActor {
-            await dataActor.updateSession(
-                session,
-                status: .cancelled,
-                endDate: Date()
-            )
-        }
-        
-        isScanning = false
-        scanStatus = "Scan cancelled"
     }
     
     func processSelectedFileTypes() async {
-        guard let dataActor = dataActor,
-              let session = currentSession else { return }
+        guard let sessionID = currentSessionID else { return }
         
         isScanning = true
-        showFileTypeSelection = false
+        scanProgress = 0.0
+        scanStartTime = Date()
+        progressPercentage = 0
+        estimatedTimeRemaining = 0
         
         do {
-            // Get all scanned files and filter by selected types
-            let allFiles = try await dataActor.getScannedFiles()
-            let filteredFiles = allFiles.filter { file in
-                fileTypeFilter.shouldInclude(fileType: file.fileType)
-            }
+            // Get file count from the session
+            guard let dataActor = dataActor else { return }
+            let fileCount = try await dataActor.getFilteredFileCount(
+                sessionID: sessionID,
+                fileTypeFilter: fileTypeFilter
+            )
             
-            scanStatus = "Processing \(filteredFiles.count) selected files..."
-            try await processScannedFiles(files: filteredFiles, session: session)
+            // Update session with filtered count
+            try await dataActor.updateSession(id: sessionID, totalFilesFound: fileCount)
+            
+            // Store filtered file count for processing
+            totalFiles = fileCount
+            
+            try await processScannedFiles(sessionID: sessionID)
         } catch {
             errorMessage = error.localizedDescription
             showError = true
         }
         
         isScanning = false
+        // Stop performance monitoring
+        PerformanceMonitor.shared.stopMonitoring()
     }
     
-    private func processScannedFiles(files: [ScannedFile], session: ScanSession) async throws {
+    private func processScannedFiles(sessionID: UUID) async throws {
         guard let dataActor = dataActor else { return }
         
+        currentPhase = .extractingMetadata
         scanStatus = "Extracting metadata..."
-        for (index, file) in files.enumerated() {
-            try await dataActor.parseMetadata(for: file, using: metadataParser)
-            await dataActor.updateSession(session, totalFilesProcessed: index + 1)
-            scanProgress = Double(index + 1) / Double(files.count) * 0.5
+        
+        // Process files within the DataActor context
+        let processedCount = try await dataActor.processFiles(
+            sessionID: sessionID,
+            fileTypeFilter: fileTypeFilter,
+            scanAllFileTypes: scanAllFileTypes,
+            metadataParser: metadataParser
+        ) { fileName, processed, total in
+            await MainActor.run {
+                self.currentFile = fileName
+                self.filesProcessed = processed
+                self.totalFiles = total
+                self.scanStatus = "Extracting metadata... (\(processed)/\(total))"
+                self.updateTimeEstimates()
+            }
         }
         
-        scanStatus = "Checking for duplicates..."
-        await dataActor.updateSession(session, status: .processing)
+        totalFiles = processedCount
         
-        let duplicateGroups = try await dataActor.findDuplicates(
-            files: files,
+        currentPhase = .checkingDuplicates
+        scanStatus = "Checking for duplicates..."
+        updateTimeEstimates()
+        try await dataActor.updateSession(id: sessionID, status: .processing)
+        
+        let duplicateGroupInfos = try await dataActor.findDuplicatesForSession(
+            sessionID: sessionID,
+            fileTypeFilter: fileTypeFilter,
+            scanAllFileTypes: scanAllFileTypes,
             enableVisualMatching: enableVisualMatching,
             duplicateChecker: duplicateChecker
         )
         
-        let totalSpaceSaved = duplicateGroups.reduce(0) { $0 + $1.potentialSpaceSaved }
-        await dataActor.updateSession(
-            session,
-            duplicatesFound: duplicateGroups.count,
+        let totalSpaceSaved = duplicateGroupInfos.reduce(0) { $0 + $1.potentialSpaceSaved }
+        try await dataActor.updateSession(
+            id: sessionID,
+            duplicatesFound: duplicateGroupInfos.count,
             totalSpaceSaved: totalSpaceSaved
         )
         
         // Step 4: Detect similar scenes
+        currentPhase = .detectingScenes
         scanStatus = "Detecting similar scenes..."
-        scanProgress = 0.9
+        updateTimeEstimates()
         
-        let sceneGroups = try await dataActor.detectSimilarScenes(
-            in: files,
+        let sceneGroupInfos = try await dataActor.detectSimilarScenesForSession(
+            sessionID: sessionID,
+            fileTypeFilter: fileTypeFilter,
+            scanAllFileTypes: scanAllFileTypes,
             sceneDetector: sceneDetector
         )
         
-        scanProgress = 1.0
-        await dataActor.updateSession(session, status: .completed, endDate: Date())
+        currentPhase = .complete
+        updateTimeEstimates()
+        try await dataActor.updateSession(id: sessionID, status: .completed, endDate: Date())
         
-        scanStatus = "Processing complete! Found \(duplicateGroups.count) duplicate groups and \(sceneGroups.count) scene groups."
+        scanStatus = "Processing complete! Found \(duplicateGroupInfos.count) duplicate groups and \(sceneGroupInfos.count) scene groups."
+    }
+    
+    private func updateTimeEstimates() {
+        guard let startTime = scanStartTime, totalFiles > 0 else { return }
+        
+        let elapsed = Date().timeIntervalSince(startTime)
+        
+        // Calculate overall progress based on phase and file progress
+        var overallProgress: Double = 0
+        
+        switch currentPhase {
+        case .idle:
+            overallProgress = 0
+        case .discovering:
+            overallProgress = 0.1 // Discovery is about 10% of total time
+        case .creatingRecords:
+            overallProgress = 0.15 // Creating records is quick, about 5%
+        case .extractingMetadata:
+            // Metadata extraction is 40% of total time
+            let metadataProgress = filesProcessed > 0 ? Double(filesProcessed) / Double(totalFiles) : 0
+            overallProgress = 0.15 + (metadataProgress * 0.4)
+        case .checkingDuplicates:
+            overallProgress = 0.55 // Duplicate checking is about 30% after metadata
+        case .detectingScenes:
+            overallProgress = 0.85 // Scene detection is about 15%
+        case .complete:
+            overallProgress = 1.0
+        }
+        
+        // Update percentage
+        progressPercentage = Int(overallProgress * 100)
+        
+        // Calculate time remaining
+        if overallProgress > 0 && overallProgress < 1.0 {
+            let estimatedTotal = elapsed / overallProgress
+            estimatedTimeRemaining = max(0, estimatedTotal - elapsed)
+        } else {
+            estimatedTimeRemaining = 0
+        }
+        
+        // Update progress bar
+        scanProgress = overallProgress
+        
+        // Update performance monitor time estimate
+        if let totalFiles = totalFiles as? Int {
+            _ = PerformanceMonitor.shared.estimateTimeRemaining(totalFiles: totalFiles)
+        }
     }
     
     func continueSession(_ session: ScanSession) async {
-        currentSession = session
+        currentSessionID = session.id
         scanPath = session.scanPath
         
         // Update UI to show session info
@@ -190,11 +288,81 @@ class MainViewModel: ObservableObject {
         
         // Update session to mark it as viewed
         if let dataActor = dataActor {
-            await dataActor.updateSession(
-                session,
+            try? await dataActor.updateSession(
+                id: session.id,
                 status: .completed,
                 endDate: session.endDate ?? Date()
             )
         }
+    }
+    
+    func cancelScan() async {
+        // Cancel operations
+        await fileScanner.cancel()
+        await duplicateChecker.cancel()
+        
+        // Update session status
+        if let sessionID = currentSessionID, let dataActor = dataActor {
+            try? await dataActor.updateSession(id: sessionID, status: .cancelled, endDate: Date())
+        }
+        
+        // Reset UI
+        isScanning = false
+        scanProgress = 0.0
+        currentPhase = .idle
+        scanStatus = "Scan cancelled"
+        
+        // Stop performance monitoring
+        PerformanceMonitor.shared.stopMonitoring()
+    }
+}
+
+extension MainViewModel {
+    var currentSession: ScanSession? {
+        // This would need to be implemented to fetch the current session
+        // For now, returning nil as it requires async context
+        nil
+    }
+}
+
+// File type filtering support
+struct SimpleFileTypeFilter: Sendable {
+    private let selectedTypes: Set<String>
+    private let discoveredTypes: [String]
+    
+    init(selectedTypes: Set<String> = [], discoveredTypes: [String] = []) {
+        self.selectedTypes = selectedTypes
+        self.discoveredTypes = discoveredTypes
+    }
+    
+    var hasSelection: Bool {
+        !selectedTypes.isEmpty
+    }
+    
+    func updateDiscoveredTypes(_ types: [String]) -> SimpleFileTypeFilter {
+        let sortedTypes = types.sorted()
+        // By default, select common image/video types
+        let commonTypes = ["jpg", "jpeg", "png", "heic", "mp4", "mov", "avi"]
+        let newSelectedTypes = Set(types.filter { commonTypes.contains($0.lowercased()) })
+        return SimpleFileTypeFilter(selectedTypes: newSelectedTypes, discoveredTypes: sortedTypes)
+    }
+    
+    func shouldInclude(fileType: String?) -> Bool {
+        guard let type = fileType else { return false }
+        return selectedTypes.contains(type.lowercased())
+    }
+    
+    func toggle(_ type: String) -> SimpleFileTypeFilter {
+        var newSelectedTypes = selectedTypes
+        if newSelectedTypes.contains(type) {
+            newSelectedTypes.remove(type)
+        } else {
+            newSelectedTypes.insert(type)
+        }
+        return SimpleFileTypeFilter(selectedTypes: newSelectedTypes, discoveredTypes: discoveredTypes)
+    }
+    
+    func isSelected(_ type: String) -> Bool {
+        selectedTypes.contains(type)
     }
 }
