@@ -89,6 +89,8 @@ struct DuplicateDetailView: View {
             return file.id == group.newestFile?.id
         case .keepLargest:
             return file.id == group.largestFile?.id
+        case .keepBestQuality:
+            return file.id == group.bestQualityFile?.id
         case .keepSelected:
             return file.id == group.selectedFileID
         case .keepAll:

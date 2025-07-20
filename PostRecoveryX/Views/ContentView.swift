@@ -9,7 +9,6 @@ struct ContentView: View {
     @State private var selectedTab = "scan"
     @State private var showingSessionPrompt = false
     @State private var hasCheckedForPreviousSession = false
-    @State private var showingPerformanceDashboard = false
     
     var lastIncompleteSession: ScanSession? {
         sessions.first { session in
@@ -152,13 +151,6 @@ struct ScanView: View {
                         
                         Spacer()
                         
-                        // Performance dashboard button
-                        Button(action: { showingPerformanceDashboard = true }) {
-                            Label("Performance", systemImage: "chart.line.uptrend.xyaxis")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        
                         // Percentage
                         Text("\(viewModel.progressPercentage)%")
                             .font(.title2)
@@ -211,6 +203,13 @@ struct ScanView: View {
                         }
                     }
                     .buttonStyle(.bordered)
+                    
+                    // Performance Dashboard - Always shown during scanning
+                    GroupBox("Performance Monitor") {
+                        PerformanceDashboardView()
+                            .frame(height: 350)
+                    }
+                    .padding(.horizontal, 40)
                 }
             } else {
                 Button("Start Scan") {
@@ -270,9 +269,6 @@ struct ScanView: View {
                     await viewModel.processSelectedFileTypes()
                 }
             )
-        }
-        .sheet(isPresented: $showingPerformanceDashboard) {
-            PerformanceDashboardView()
         }
     }
     
@@ -383,6 +379,7 @@ struct StatusBadge: View {
             ScanSession.self,
             ScannedFile.self,
             DuplicateGroup.self,
-            OrganizationTask.self
+            OrganizationTask.self,
+            SimilarSceneGroup.self
         ], inMemory: true)
 }

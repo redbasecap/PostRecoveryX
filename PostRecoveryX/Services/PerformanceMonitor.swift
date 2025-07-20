@@ -194,6 +194,6 @@ class PerformanceMonitor: ObservableObject {
 // Extension for time_value_t
 extension time_value_t {
     var seconds: Double {
-        return Double(seconds) + Double(microseconds) / 1_000_000.0
+        return Double(self.seconds) + Double(self.microseconds) / 1_000_000.0
     }
 }

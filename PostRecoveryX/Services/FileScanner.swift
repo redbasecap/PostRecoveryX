@@ -34,45 +34,86 @@ actor FileScanner {
             throw FileScannerError.cannotCreateEnumerator
         }
         
+        // Collect all URLs first for batch processing
+        var allURLs: [URL] = []
         while let fileURL = enumerator.nextObject() as? URL {
             if isCancelled {
                 throw FileScannerError.cancelled
             }
+            allURLs.append(fileURL)
+        }
+        
+        // Process URLs in concurrent batches for better performance
+        let batchSize = PerformanceConfiguration.shared.fileScanningBatchSize
+        let batches = allURLs.chunked(into: batchSize)
+        
+        for batch in batches {
+            if isCancelled {
+                throw FileScannerError.cancelled
+            }
             
-            do {
-                let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
-                
-                guard let isRegularFile = resourceValues.isRegularFile,
-                      isRegularFile else {
-                    continue
+            let batchResults = await withTaskGroup(of: [(URL, Bool, Int)].self) { group in
+                group.addTask {
+                    var results: [(URL, Bool, Int)] = []
+                    
+                    for fileURL in batch {
+                        do {
+                            let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
+                            
+                            guard let isRegularFile = resourceValues.isRegularFile,
+                                  isRegularFile else {
+                                continue
+                            }
+                            
+                            let fileSize = resourceValues.fileSize ?? 0
+                            var shouldIncludeFile = false
+                            
+                            // Include all regular files when scanning all types
+                            if scanAllTypes {
+                                shouldIncludeFile = true
+                            } else if let contentType = resourceValues.contentType,
+                                     self.isImageOrVideo(contentType: contentType) {
+                                // Legacy mode: only images and videos
+                                shouldIncludeFile = true
+                            }
+                            
+                            if shouldIncludeFile {
+                                results.append((fileURL, true, fileSize))
+                            }
+                        } catch {
+                            continue
+                        }
+                    }
+                    
+                    return results
                 }
                 
-                let fileSize = resourceValues.fileSize ?? 0
-                
-                // Include all regular files when scanning all types
-                if scanAllTypes {
+                var allBatchResults: [(URL, Bool, Int)] = []
+                for await batchResult in group {
+                    allBatchResults.append(contentsOf: batchResult)
+                }
+                return allBatchResults
+            }
+            
+            // Add valid files to discovered files and report progress
+            for (fileURL, shouldInclude, fileSize) in batchResults {
+                if shouldInclude {
                     discoveredFiles.append(fileURL)
+                    
                     // Record file processed for performance monitoring
                     await MainActor.run {
                         PerformanceMonitor.shared.recordFileProcessed(size: Int64(fileSize))
                     }
-                } else if let contentType = resourceValues.contentType,
-                         isImageOrVideo(contentType: contentType) {
-                    // Legacy mode: only images and videos
-                    discoveredFiles.append(fileURL)
-                    await MainActor.run {
-                        PerformanceMonitor.shared.recordFileProcessed(size: Int64(fileSize))
-                    }
                 }
-                
-                // Report progress
-                if let callback = progressCallback {
-                    await MainActor.run {
-                        callback(fileURL.lastPathComponent, discoveredFiles.count)
-                    }
+            }
+            
+            // Report progress for the batch
+            if let callback = progressCallback, let lastFile = batchResults.last {
+                let currentCount = discoveredFiles.count
+                let fileName = lastFile.0.lastPathComponent
+                await MainActor.run {
+                    callback(fileName, currentCount)
                 }
-            } catch {
-                continue
             }
         }
         
@@ -82,49 +123,6 @@ actor FileScanner {
         }
         
         return discoveredFiles
-    }
-    
-    func createScannedFiles(from urls: [URL]) async throws -> [ScannedFile] {
-        var scannedFiles: [ScannedFile] = []
-        
-        progress = Progress(totalUnitCount: Int64(urls.count))
-        
-        for url in urls {
-            if isCancelled {
-                throw FileScannerError.cancelled
-            }
-            
-            do {
-                let resourceValues = try url.resourceValues(forKeys: [
-                    .fileSizeKey,
-                    .contentTypeKey,
-                    .creationDateKey,
-                    .contentModificationDateKey
-                ])
-                
-                let fileSize = Int64(resourceValues.fileSize ?? 0)
-                let scannedFile = ScannedFile(
-                    path: url.path,
-                    fileName: url.lastPathComponent,
-                    fileSize: fileSize,
-                    fileType: resourceValues.contentType?.identifier ?? "unknown"
-                )
-                
-                scannedFile.creationDate = resourceValues.creationDate
-                scannedFile.modificationDate = resourceValues.contentModificationDate
-                
-                // Mark as thumbnail if it matches thumbnail criteria
-                scannedFile.isThumbnail = scannedFile.isPotentialThumbnail
-                
-                scannedFiles.append(scannedFile)
-                
-                progress?.completedUnitCount += 1
-            } catch {
-                continue
-            }
-        }
-        
-        return scannedFiles
     }
     
     func cancel() {

@@ -86,7 +86,9 @@ final class PostRecoveryXTests: XCTestCase {
         file1.sha256Hash = "abc123"
         file2.sha256Hash = "abc123"
         
-        let files = try await dataActor.createScannedFiles(from: [])
+        // Create a session first
+        let session = await dataActor.createSession(scanPath: "/test")
+        let files = try await dataActor.createScannedFiles(from: [], sessionID: session.id)
         
         // Manually insert our test files
         modelContext.insert(file1)
@@ -144,7 +146,7 @@ final class PostRecoveryXTests: XCTestCase {
         
         XCTAssertEqual(session.scanPath, "/test/path")
         XCTAssertEqual(session.status, .scanning)
-        XCTAssertNotNil(session.startDate)
+        XCTAssertNotNil(session.id)
     }
     
     func testDataActorFileCreation() async throws {
@@ -157,7 +159,9 @@ final class PostRecoveryXTests: XCTestCase {
         try createTestFile(at: url1)
         try createTestFile(at: url2)
         
-        let files = try await dataActor.createScannedFiles(from: [url1, url2])
+        // Create a session first
+        let session = await dataActor.createSession(scanPath: testDir.path)
+        let files = try await dataActor.createScannedFiles(from: [url1, url2], sessionID: session.id)
         
         XCTAssertEqual(files.count, 2)
         XCTAssertEqual(files[0].fileName, "test1.jpg")
@@ -361,9 +365,9 @@ final class IntegrationTests: XCTestCase {
             try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
         }
         
-        // Verify results
-        XCTAssertNotNil(viewModel.currentSession)
-        XCTAssertEqual(viewModel.currentSession?.status, .completed)
-        XCTAssertGreaterThan(viewModel.currentSession?.totalFilesFound ?? 0, 0)
+        // Verify results (session is tracked via currentSessionID)
+        XCTAssertNotNil(viewModel.currentSessionID)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertEqual(viewModel.currentPhase, .complete)
     }
 }

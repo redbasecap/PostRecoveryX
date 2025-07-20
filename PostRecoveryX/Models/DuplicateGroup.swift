@@ -21,7 +21,7 @@ final class DuplicateGroup {
         self.fileCount = 0
         self.files = []
         self.isResolved = false
-        self.isPerceptualMatch = sha256Hash.hasPrefix("perceptual_")
+        self.isPerceptualMatch = sha256Hash.hasPrefix("visual_")
     }
 }
 

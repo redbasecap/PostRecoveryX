@@ -13,6 +13,7 @@ final class ScanSession {
     var totalSpaceSaved: Int64
     var status: SessionStatus
     var error: String?
+    var scannedFiles: [ScannedFile] = []
     
     init(scanPath: String) {
         self.id = UUID()

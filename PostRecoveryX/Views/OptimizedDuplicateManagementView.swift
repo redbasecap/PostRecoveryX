@@ -219,7 +219,7 @@ struct OptimizedDuplicateManagementView: View {
                 self.duplicateGroups = groups
                 self.isLoading = false
             }
-        }.value
+        }
     }
 }
 
@@ -321,7 +321,7 @@ struct OptimizedDuplicateGroupCard: View {
                     self.isLoadingImage = false
                 }
             }
-        }.value
+        }
     }
 }
 

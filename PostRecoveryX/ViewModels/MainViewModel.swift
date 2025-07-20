@@ -104,13 +104,12 @@ class MainViewModel: ObservableObject {
             updateTimeEstimates()
             
             let sessionID = sessionInfo.id
-            let files = try await fileScanner.createScannedFiles(from: urls)
-            try await dataActor.saveScannedFiles(files, sessionID: sessionID)
+            let fileInfos = try await dataActor.createScannedFiles(from: urls, sessionID: sessionID)
             
             // If scanning all types, show file type selection
             if scanAllFileTypes {
                 // Extract file types from scanned files
-                let fileTypes = files.compactMap { $0.fileType }.reduce(into: Set<String>()) { $0.insert($1) }
+                let fileTypes = fileInfos.compactMap { $0.fileType }.reduce(into: Set<String>()) { $0.insert($1) }
                 
                 // Update file type filter with discovered types
                 await MainActor.run {
@@ -271,9 +270,7 @@ class MainViewModel: ObservableObject {
         scanProgress = overallProgress
         
         // Update performance monitor time estimate
-        if let totalFiles = totalFiles as? Int {
-            _ = PerformanceMonitor.shared.estimateTimeRemaining(totalFiles: totalFiles)
-        }
+        _ = PerformanceMonitor.shared.estimateTimeRemaining(totalFiles: totalFiles)
     }
     
     func continueSession(_ session: ScanSession) async {
@@ -322,47 +319,5 @@ extension MainViewModel {
         // This would need to be implemented to fetch the current session
         // For now, returning nil as it requires async context
         nil
-    }
-}
-
-// File type filtering support
-struct SimpleFileTypeFilter: Sendable {
-    private let selectedTypes: Set<String>
-    private let discoveredTypes: [String]
-    
-    init(selectedTypes: Set<String> = [], discoveredTypes: [String] = []) {
-        self.selectedTypes = selectedTypes
-        self.discoveredTypes = discoveredTypes
-    }
-    
-    var hasSelection: Bool {
-        !selectedTypes.isEmpty
-    }
-    
-    func updateDiscoveredTypes(_ types: [String]) -> SimpleFileTypeFilter {
-        let sortedTypes = types.sorted()
-        // By default, select common image/video types
-        let commonTypes = ["jpg", "jpeg", "png", "heic", "mp4", "mov", "avi"]
-        let newSelectedTypes = Set(types.filter { commonTypes.contains($0.lowercased()) })
-        return SimpleFileTypeFilter(selectedTypes: newSelectedTypes, discoveredTypes: sortedTypes)
-    }
-    
-    func shouldInclude(fileType: String?) -> Bool {
-        guard let type = fileType else { return false }
-        return selectedTypes.contains(type.lowercased())
-    }
-    
-    func toggle(_ type: String) -> SimpleFileTypeFilter {
-        var newSelectedTypes = selectedTypes
-        if newSelectedTypes.contains(type) {
-            newSelectedTypes.remove(type)
-        } else {
-            newSelectedTypes.insert(type)
-        }
-        return SimpleFileTypeFilter(selectedTypes: newSelectedTypes, discoveredTypes: discoveredTypes)
-    }
-    
-    func isSelected(_ type: String) -> Bool {
-        selectedTypes.contains(type)
     }
 }

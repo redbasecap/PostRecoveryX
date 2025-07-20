@@ -24,48 +24,78 @@ actor DuplicateChecker {
         var hashGroups: [String: [ScannedFile]] = [:]
         var perceptualGroups: [ScannedFile] = []
         
-        for file in files {
+        // Process files in concurrent batches for better performance
+        let batchSize = PerformanceConfiguration.shared.duplicateDetectionBatchSize
+        let batches = files.chunked(into: batchSize)
+        
+        for batch in batches {
             if isCancelled {
                 throw DuplicateCheckerError.cancelled
             }
             
-            do {
-                // Record hash computation start
-                await MainActor.run {
-                    PerformanceMonitor.shared.recordOperationStart("Hash Computation")
-                }
-                
-                let hash = try await computeHash(for: file)
-                file.sha256Hash = hash
-                file.isProcessed = true
-                
-                // Record hash computation complete
-                await MainActor.run {
-                    PerformanceMonitor.shared.recordOperationComplete("Hash Computation")
-                    PerformanceMonitor.shared.recordFileProcessed(size: file.fileSize)
-                }
-                
-                // Check if it's an image for enhanced visual matching
-                if enableVisualMatching,
-                   let uti = UTType(filenameExtension: URL(fileURLWithPath: file.path).pathExtension),
-                   uti.conforms(to: .image) {
-                    if let enhancedHash = try await computeEnhancedHash(for: file) {
-                        file.perceptualHash = enhancedHash.perceptualHash.hash
-                        perceptualGroups.append(file)
+            // Process hash computation concurrently within each batch
+            let batchResults = try await withThrowingTaskGroup(of: (ScannedFile, String?, UInt64?).self) { group in
+                for file in batch {
+                    group.addTask {
+                        do {
+                            // Record hash computation start
+                            await MainActor.run {
+                                PerformanceMonitor.shared.recordOperationStart("Hash Computation")
+                            }
+                            
+                            let hash = try await self.computeHash(for: file)
+                            var perceptualHash: UInt64? = nil
+                            
+                            // Check if it's an image for enhanced visual matching
+                            if enableVisualMatching,
+                               let uti = UTType(filenameExtension: URL(fileURLWithPath: file.path).pathExtension),
+                               uti.conforms(to: .image) {
+                                if let enhancedHash = try await self.computeEnhancedHash(for: file) {
+                                    perceptualHash = enhancedHash.perceptualHash.hash
+                                }
+                            }
+                            
+                            // Record hash computation complete
+                            await MainActor.run {
+                                PerformanceMonitor.shared.recordOperationComplete("Hash Computation")
+                                PerformanceMonitor.shared.recordFileProcessed(size: file.fileSize)
+                            }
+                            
+                            return (file, hash, perceptualHash)
+                        } catch {
+                            file.error = error.localizedDescription
+                            file.isProcessed = true
+                            return (file, nil, nil)
+                        }
                     }
                 }
                 
-                if hashGroups[hash] != nil {
-                    hashGroups[hash]?.append(file)
-                } else {
-                    hashGroups[hash] = [file]
+                var results: [(ScannedFile, String?, UInt64?)] = []
+                for try await result in group {
+                    results.append(result)
+                }
+                return results
+            }
+            
+            // Update file objects and group results
+            for (file, hash, perceptualHash) in batchResults {
+                if let hash = hash {
+                    file.sha256Hash = hash
+                    file.isProcessed = true
+                    
+                    if let perceptualHash = perceptualHash {
+                        file.perceptualHash = perceptualHash
+                        perceptualGroups.append(file)
+                    }
+                    
+                    if hashGroups[hash] != nil {
+                        hashGroups[hash]?.append(file)
+                    } else {
+                        hashGroups[hash] = [file]
+                    }
                 }
                 
                 progress?.completedUnitCount += 1
-            } catch {
-                file.error = error.localizedDescription
-                file.isProcessed = true
-                continue
             }
         }
         
