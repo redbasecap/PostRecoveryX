@@ -128,7 +128,7 @@ class MainViewModel: ObservableObject {
             }
             
             scanStatus = "Processing \(filteredFiles.count) selected files..."
-            await processScannedFiles(files: filteredFiles, session: session)
+            try await processScannedFiles(files: filteredFiles, session: session)
         } catch {
             errorMessage = error.localizedDescription
             showError = true
