@@ -119,7 +119,7 @@ class PerformanceMonitor: ObservableObject {
         
         if result == KERN_SUCCESS {
             // This gives us thread time, we need to calculate percentage
-            let totalTime = info.user_time.seconds + info.system_time.seconds
+            let totalTime = info.user_time.totalSeconds + info.system_time.totalSeconds
             let elapsedTime = Date().timeIntervalSince(startTime ?? Date())
             return elapsedTime > 0 ? min(totalTime / elapsedTime, 1.0) : 0
         }
@@ -193,7 +193,7 @@ class PerformanceMonitor: ObservableObject {
 
 // Extension for time_value_t
 extension time_value_t {
-    var seconds: Double {
+    var totalSeconds: Double {
         return Double(self.seconds) + Double(self.microseconds) / 1_000_000.0
     }
 }
