@@ -3,7 +3,7 @@ import SwiftData
 
 struct OrganizationView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var scannedFiles: [ScannedFile]
+    @State private var scannedFileCount: Int = 0
     @StateObject private var viewModel = OrganizationViewModel()
     
     var body: some View {
@@ -137,17 +137,17 @@ struct OrganizationView: View {
                 }
             } else {
                 VStack(spacing: 10) {
-                    Text("\(scannedFiles.count) files available for organization")
+                    Text("\(scannedFileCount) files available for organization")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
                     Button("Organize Files") {
                         Task {
-                            await viewModel.organizeFiles(scannedFiles, modelContext: modelContext)
+                            await viewModel.organizeFiles(modelContext: modelContext)
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.outputPath.isEmpty || scannedFiles.isEmpty)
+                    .disabled(viewModel.outputPath.isEmpty || scannedFileCount == 0)
                 }
             }
             
@@ -182,12 +182,26 @@ struct OrganizationView: View {
         }
         .padding()
         .frame(minWidth: 600, minHeight: 500)
+        .task {
+            await loadFileCount()
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") {
                 viewModel.showError = false
             }
         } message: {
             Text(viewModel.errorMessage)
+        }
+    }
+    
+    @MainActor
+    private func loadFileCount() async {
+        let descriptor = FetchDescriptor<ScannedFile>()
+        do {
+            scannedFileCount = try modelContext.fetchCount(descriptor)
+        } catch {
+            print("Failed to fetch file count: \(error)")
+            scannedFileCount = 0
         }
     }
 }

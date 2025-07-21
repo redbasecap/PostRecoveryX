@@ -327,16 +327,33 @@ struct OptimizedDuplicateGroupCard: View {
 
 extension NSImage {
     func resized(to newSize: CGSize) -> NSImage? {
-        let newImage = NSImage(size: newSize)
-        newImage.lockFocus()
+        guard let bitmapRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(newSize.width),
+            pixelsHigh: Int(newSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
         
+        bitmapRep.size = newSize
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
         NSGraphicsContext.current?.imageInterpolation = .high
+        
         draw(in: NSRect(origin: .zero, size: newSize),
              from: NSRect(origin: .zero, size: size),
              operation: .copy,
              fraction: 1.0)
         
-        newImage.unlockFocus()
+        NSGraphicsContext.restoreGraphicsState()
+        
+        let newImage = NSImage(size: newSize)
+        newImage.addRepresentation(bitmapRep)
         return newImage
     }
 }

@@ -20,19 +20,14 @@ struct DuplicateManagementView: View {
     @State private var globalResolutionAction: ResolutionAction?
     @State private var showingWorkflowGuide = false
     @State private var dataActor: DataActor?
+    @State private var cachedPotentialSpaceSaved: Int64 = 0
     
     var selectedGroupsCount: Int {
         selectedGroups.count
     }
     
     var potentialSpaceSaved: Int64 {
-        duplicateGroups
-            .filter { selectedGroups.contains($0.id) }
-            .reduce(0) { total, group in
-                let keepCount = selectedFilesToKeep[group.id] != nil ? 1 : 0
-                let deleteCount = max(0, group.files.count - keepCount)
-                return total + (group.fileSize * Int64(deleteCount))
-            }
+        cachedPotentialSpaceSaved
     }
     
     var formattedSpaceSaved: String {
@@ -270,6 +265,7 @@ struct DuplicateManagementView: View {
         .onAppear {
             let container = modelContext.container
             dataActor = DataActor(modelContainer: container)
+            updatePotentialSpaceSaved()
         }
     }
     
@@ -281,11 +277,13 @@ struct DuplicateManagementView: View {
                 selectedFilesToKeep[group.id] = group.oldestFile?.id
             }
         }
+        updatePotentialSpaceSaved()
     }
     
     private func selectNone() {
         selectedGroups.removeAll()
         selectedFilesToKeep.removeAll()
+        updatePotentialSpaceSaved()
     }
     
     private func toggleGroupSelection(_ group: DuplicateGroup) {
@@ -299,6 +297,7 @@ struct DuplicateManagementView: View {
                 selectedFilesToKeep[group.id] = group.oldestFile?.id
             }
         }
+        updatePotentialSpaceSaved()
     }
     
     private func toggleGroupExpansion(_ group: DuplicateGroup) {
@@ -550,6 +549,16 @@ struct DuplicateManagementView: View {
             }
         }
     }
+    
+    private func updatePotentialSpaceSaved() {
+        cachedPotentialSpaceSaved = duplicateGroups
+            .filter { selectedGroups.contains($0.id) }
+            .reduce(0) { total, group in
+                let keepCount = selectedFilesToKeep[group.id] != nil ? 1 : 0
+                let deleteCount = max(0, group.files.count - keepCount)
+                return total + (group.fileSize * Int64(deleteCount))
+            }
+    }
 }
 
 struct DuplicateGroupCard: View {
@@ -799,17 +808,35 @@ struct DuplicateGroupCard: View {
             height: imageSize.height * ratio
         )
         
-        let thumbnail = NSImage(size: newSize)
-        thumbnail.lockFocus()
+        guard let bitmapRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(newSize.width),
+            pixelsHigh: Int(newSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return image }
+        
+        bitmapRep.size = newSize
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
         NSGraphicsContext.current?.imageInterpolation = .high
+        
         image.draw(
             in: NSRect(origin: .zero, size: newSize),
             from: NSRect(origin: .zero, size: imageSize),
             operation: .copy,
             fraction: 1.0
         )
-        thumbnail.unlockFocus()
         
+        NSGraphicsContext.restoreGraphicsState()
+        
+        let thumbnail = NSImage(size: newSize)
+        thumbnail.addRepresentation(bitmapRep)
         return thumbnail
     }
     

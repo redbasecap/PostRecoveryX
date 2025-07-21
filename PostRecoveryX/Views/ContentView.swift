@@ -5,7 +5,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = MainViewModel()
     @Query(sort: \ScanSession.startDate, order: .reverse) private var sessions: [ScanSession]
-    @Query private var duplicateGroups: [DuplicateGroup]
+    @State private var duplicateGroupCount: Int = 0
     @State private var selectedTab = "scan"
     @State private var showingSessionPrompt = false
     @State private var hasCheckedForPreviousSession = false

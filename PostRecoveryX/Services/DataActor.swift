@@ -2,6 +2,16 @@ import Foundation
 import SwiftData
 import UniformTypeIdentifiers
 
+// Thread-safe struct for passing file metadata between threads
+private struct FileMetadata {
+    let path: String
+    let fileName: String
+    let fileSize: Int64
+    let fileType: String
+    let creationDate: Date?
+    let modificationDate: Date?
+}
+
 enum DataActorError: Error {
     case sessionNotFound
 }
@@ -131,9 +141,14 @@ actor DataActor {
         let batchSize = PerformanceConfiguration.shared.databaseBatchSize
         let batches = urls.chunked(into: batchSize)
         
+        // Save frequency: every 10 batches or 10,000 files
+        let saveFrequency = 10
+        var batchCounter = 0
+        
         for batch in batches {
             // Process file resource reading concurrently
-            let batchResults = await withTaskGroup(of: (URL, ScannedFile?).self) { group in
+            // First extract file metadata in background tasks
+            let batchMetadata = await withTaskGroup(of: (URL, FileMetadata?).self) { group in
                 for url in batch {
                     group.addTask {
                         do {
@@ -144,38 +159,46 @@ actor DataActor {
                                 .contentModificationDateKey
                             ])
                             
-                            let fileSize = Int64(resourceValues.fileSize ?? 0)
-                            let scannedFile = ScannedFile(
+                            let metadata = FileMetadata(
                                 path: url.path,
                                 fileName: url.lastPathComponent,
-                                fileSize: fileSize,
-                                fileType: resourceValues.contentType?.identifier ?? "unknown"
+                                fileSize: Int64(resourceValues.fileSize ?? 0),
+                                fileType: resourceValues.contentType?.identifier ?? "unknown",
+                                creationDate: resourceValues.creationDate,
+                                modificationDate: resourceValues.contentModificationDate
                             )
                             
-                            scannedFile.creationDate = resourceValues.creationDate
-                            scannedFile.modificationDate = resourceValues.contentModificationDate
-                            scannedFile.session = session
-                            
-                            // Mark as thumbnail if it matches thumbnail criteria
-                            scannedFile.isThumbnail = scannedFile.isPotentialThumbnail
-                            
-                            return (url, scannedFile)
+                            return (url, metadata)
                         } catch {
                             return (url, nil)
                         }
                     }
                 }
                 
-                var results: [(URL, ScannedFile?)] = []
+                var results: [(URL, FileMetadata?)] = []
                 for await result in group {
                     results.append(result)
                 }
                 return results
             }
             
-            // Insert batch results into model context
-            for (_, scannedFile) in batchResults {
-                if let scannedFile = scannedFile {
+            // Create ScannedFile objects on the actor's thread with proper model context
+            for (_, metadata) in batchMetadata {
+                if let metadata = metadata {
+                    let scannedFile = ScannedFile(
+                        path: metadata.path,
+                        fileName: metadata.fileName,
+                        fileSize: metadata.fileSize,
+                        fileType: metadata.fileType
+                    )
+                    
+                    scannedFile.creationDate = metadata.creationDate
+                    scannedFile.modificationDate = metadata.modificationDate
+                    scannedFile.session = session
+                    
+                    // Mark as thumbnail if it matches thumbnail criteria
+                    scannedFile.isThumbnail = scannedFile.isPotentialThumbnail
+                    
                     modelContext.insert(scannedFile)
                     
                     // Create sendable info
@@ -188,7 +211,16 @@ actor DataActor {
                 }
             }
             
-            // Save after each batch to avoid memory buildup
+            batchCounter += 1
+            
+            // Save less frequently to reduce UI blocking
+            if batchCounter % saveFrequency == 0 {
+                try modelContext.save()
+            }
+        }
+        
+        // Final save for any remaining unsaved data
+        if batchCounter % saveFrequency != 0 {
             try modelContext.save()
         }
         
@@ -348,7 +380,7 @@ actor DataActor {
                                   let hash2 = file2.perceptualHash else { continue }
                             
                             let timeDiff = abs(date2.timeIntervalSince(date1))
-                            let visualDistance = self.hammingDistance(hash1, hash2)
+                            let visualDistance = await self.hammingDistance(hash1, hash2)
                             
                             if timeDiff <= sequenceTimeThreshold && visualDistance <= visualSimilarityThreshold {
                                 sequenceFiles.append(file2)
@@ -356,7 +388,7 @@ actor DataActor {
                         }
                         
                         if sequenceFiles.count >= 2 {
-                            let group = self.createSceneGroup(from: sequenceFiles, type: .sequence)
+                            let group = await self.createSceneGroup(from: sequenceFiles, type: .sequence)
                             localGroups.append(group)
                             localProcessed.formUnion(sequenceFiles.map { $0.id })
                         }
@@ -437,7 +469,7 @@ actor DataActor {
                                 eventFiles.append(file)
                             } else {
                                 if eventFiles.count >= 5 {
-                                    let group = self.createSceneGroup(from: eventFiles, type: .event)
+                                    let group = await self.createSceneGroup(from: eventFiles, type: .event)
                                     group.locationInfo = URL(fileURLWithPath: folder).lastPathComponent
                                     localGroups.append(group)
                                 }
@@ -451,7 +483,7 @@ actor DataActor {
                     }
                     
                     if eventFiles.count >= 5 {
-                        let group = self.createSceneGroup(from: eventFiles, type: .event)
+                        let group = await self.createSceneGroup(from: eventFiles, type: .event)
                         group.locationInfo = URL(fileURLWithPath: folder).lastPathComponent
                         localGroups.append(group)
                     }

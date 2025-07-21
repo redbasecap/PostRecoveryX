@@ -41,7 +41,7 @@ class OrganizationViewModel: ObservableObject {
         }
     }
     
-    func organizeFiles(_ files: [ScannedFile], modelContext: ModelContext) async {
+    func organizeFiles(modelContext: ModelContext) async {
         guard !outputPath.isEmpty else { return }
         
         isOrganizing = true
@@ -50,29 +50,52 @@ class OrganizationViewModel: ObservableObject {
         organizationSummary = nil
         
         do {
-            let filesToOrganize = files.filter { file in
-                file.isProcessed && (file.originalCreationDate != nil || file.creationDate != nil)
-            }
+            // Fetch files in batches to avoid memory issues
+            let descriptor = FetchDescriptor<ScannedFile>(
+                predicate: #Predicate { file in
+                    file.isProcessed && (file.originalCreationDate != nil || file.creationDate != nil)
+                }
+            )
             
-            if filesToOrganize.isEmpty {
+            let totalCount = try modelContext.fetchCount(descriptor)
+            if totalCount == 0 {
                 throw OrganizationError.noFilesWithDates
             }
             
-            organizationStatus = "Creating organization plan..."
+            var allTasks: [OrganizationTask] = []
+            let batchSize = 1000
+            var offset = 0
             
-            let tasks = try await createOrganizationTasks(
-                for: filesToOrganize,
-                to: URL(fileURLWithPath: outputPath),
-                modelContext: modelContext
-            )
+            while offset < totalCount {
+                var batchDescriptor = descriptor
+                batchDescriptor.fetchLimit = batchSize
+                batchDescriptor.fetchOffset = offset
+                
+                let batchFiles = try modelContext.fetch(batchDescriptor)
+                if batchFiles.isEmpty { break }
+                
+                organizationStatus = "Processing batch \(offset/batchSize + 1)..."
+                
+                let batchTasks = try await createOrganizationTasks(
+                    for: batchFiles,
+                    to: URL(fileURLWithPath: outputPath),
+                    modelContext: modelContext
+                )
+                
+                allTasks.append(contentsOf: batchTasks)
+                offset += batchSize
+                
+                // Update progress
+                organizationProgress = Double(offset) / Double(totalCount) * 0.5
+            }
             
-            organizationTasks = tasks
+            organizationTasks = allTasks
             
-            organizationStatus = "Organizing \(tasks.count) files..."
+            organizationStatus = "Organizing \(allTasks.count) files..."
             
-            let (organized, errors) = await executeOrganizationTasks(tasks)
+            let (organized, errors) = await executeOrganizationTasks(allTasks)
             
-            let foldersCreated = Set(tasks.map { URL(fileURLWithPath: $0.destinationPath).path }).count
+            let foldersCreated = Set(allTasks.map { URL(fileURLWithPath: $0.destinationPath).path }).count
             
             organizationSummary = OrganizationSummary(
                 filesOrganized: organized,

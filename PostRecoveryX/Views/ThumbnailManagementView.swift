@@ -11,6 +11,7 @@ struct ThumbnailManagementView: View {
     @State private var showingDeleteConfirmation = false
     @State private var sortOrder = SortOrder.size
     @State private var isDeleting = false
+    @State private var cachedTotalSize: Int64 = 0
     
     enum SortOrder: String, CaseIterable {
         case size = "Size"
@@ -29,12 +30,8 @@ struct ThumbnailManagementView: View {
         }
     }
     
-    var totalSize: Int64 {
-        thumbnails.reduce(0) { $0 + $1.fileSize }
-    }
-    
     var formattedTotalSize: String {
-        ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
+        ByteCountFormatter.string(fromByteCount: cachedTotalSize, countStyle: .file)
     }
     
     var body: some View {
@@ -46,6 +43,12 @@ struct ThumbnailManagementView: View {
                         .font(.title2)
                         .bold()
                     Text("\(thumbnails.count) thumbnails found • \(formattedTotalSize) total")
+                        .onAppear {
+                            updateTotalSize()
+                        }
+                        .onChange(of: thumbnails.count) { _, _ in
+                            updateTotalSize()
+                        }
                         .foregroundColor(.secondary)
                 }
                 
@@ -159,26 +162,43 @@ struct ThumbnailManagementView: View {
         isDeleting = true
         
         let filesToDelete = Array(selectedThumbnails)
-        var deletedCount = 0
         
-        for file in filesToDelete {
-            do {
-                try FileManager.default.removeItem(at: file.url)
-                modelContext.delete(file)
-                deletedCount += 1
-            } catch {
-                print("Failed to delete \(file.fileName): \(error)")
+        await Task.detached {
+            var deletedCount = 0
+            var failedFileIDs: Set<UUID> = []
+            
+            // Perform file deletion in background
+            for file in filesToDelete {
+                do {
+                    try FileManager.default.removeItem(at: file.url)
+                    deletedCount += 1
+                } catch {
+                    print("Failed to delete \(file.fileName): \(error)")
+                    failedFileIDs.insert(file.id)
+                }
             }
-        }
-        
-        do {
-            try modelContext.save()
-            selectedThumbnails.removeAll()
-        } catch {
-            print("Failed to save context: \(error)")
-        }
-        
-        isDeleting = false
+            
+            // Update UI on main thread
+            await MainActor.run {
+                // Remove successfully deleted files from context
+                for file in filesToDelete where !failedFileIDs.contains(file.id) {
+                    modelContext.delete(file)
+                }
+                
+                do {
+                    try modelContext.save()
+                    selectedThumbnails.removeAll()
+                } catch {
+                    print("Failed to save context: \(error)")
+                }
+                
+                isDeleting = false
+            }
+        }.value
+    }
+    
+    private func updateTotalSize() {
+        cachedTotalSize = thumbnails.reduce(0) { $0 + $1.fileSize }
     }
 }
 

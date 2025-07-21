@@ -72,7 +72,7 @@ actor FileScanner {
                             if scanAllTypes {
                                 shouldIncludeFile = true
                             } else if let contentType = resourceValues.contentType,
-                                     self.isImageOrVideo(contentType: contentType) {
+                                     await self.isImageOrVideo(contentType: contentType) {
                                 // Legacy mode: only images and videos
                                 shouldIncludeFile = true
                             }

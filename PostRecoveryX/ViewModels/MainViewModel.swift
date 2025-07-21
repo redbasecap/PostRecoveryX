@@ -104,6 +104,8 @@ class MainViewModel: ObservableObject {
             updateTimeEstimates()
             
             let sessionID = sessionInfo.id
+            
+            // DataActor handles concurrency internally, no need for Task.detached
             let fileInfos = try await dataActor.createScannedFiles(from: urls, sessionID: sessionID)
             
             // If scanning all types, show file type selection
