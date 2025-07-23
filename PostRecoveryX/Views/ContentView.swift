@@ -33,6 +33,7 @@ struct ContentView: View {
                 }
                 .tag("organize")
         }
+        .environmentObject(viewModel)
         .onAppear {
             viewModel.setModelContext(modelContext)
         }

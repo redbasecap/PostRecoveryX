@@ -3,9 +3,18 @@ import SwiftData
 
 struct ThumbnailManagementView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(filter: #Predicate<ScannedFile> { file in
-        file.isThumbnail == true
-    }) private var thumbnails: [ScannedFile]
+    @EnvironmentObject var viewModel: MainViewModel
+    @Query private var allThumbnails: [ScannedFile]
+    
+    private var thumbnails: [ScannedFile] {
+        // Filter to show only thumbnails from current scan session
+        guard let currentSessionID = viewModel.currentSessionID else {
+            return []
+        }
+        return allThumbnails.filter { file in
+            file.isThumbnail == true && file.session?.id == currentSessionID
+        }
+    }
     
     @State private var selectedThumbnails: Set<ScannedFile> = []
     @State private var showingDeleteConfirmation = false
