@@ -18,7 +18,6 @@ struct PostRecoveryXApp: App {
             DuplicateGroup.self,
             OrganizationTask.self,
             ScanSession.self,
-            SimilarSceneGroup.self,
             PerformanceData.self
         ])
         

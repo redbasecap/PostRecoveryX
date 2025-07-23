@@ -9,7 +9,6 @@ enum ScanPhase: String {
     case creatingRecords = "Creating Records"
     case extractingMetadata = "Extracting Metadata"
     case checkingDuplicates = "Checking for Duplicates"
-    case detectingScenes = "Detecting Similar Scenes"
     case complete = "Complete"
 }
 
@@ -38,11 +37,14 @@ class MainViewModel: ObservableObject {
     @Published var estimatedTimeRemaining: TimeInterval = 0
     @Published var progressPercentage: Int = 0
     
+    // UI update throttling
+    private var lastUIUpdate = Date()
+    private let uiUpdateInterval: TimeInterval = 0.1 // Update UI at most 10 times per second
+    
     private let fileScanner = FileScanner()
     private let duplicateChecker = DuplicateChecker()
     private let metadataParser = MetadataParser()
     private let folderOrganizer = FolderOrganizer()
-    private let sceneDetector = SceneDetector()
     
     private var dataActor: DataActor?
     
@@ -91,10 +93,16 @@ class MainViewModel: ObservableObject {
                 at: URL(fileURLWithPath: scanPath),
                 scanAllTypes: scanAllFileTypes
             ) { [weak self] fileName, count in
-                self?.currentFile = fileName
-                self?.filesDiscovered = count
-                self?.scanStatus = "Discovering files... (\(count) found)"
-                self?.updateTimeEstimates()
+                guard let self = self else { return }
+                // Throttle UI updates during file discovery
+                let now = Date()
+                if now.timeIntervalSince(self.lastUIUpdate) >= self.uiUpdateInterval {
+                    self.currentFile = fileName
+                    self.filesDiscovered = count
+                    self.scanStatus = "Discovering files... (\(count) found)"
+                    self.updateTimeEstimates()
+                    self.lastUIUpdate = now
+                }
             }
             
             totalFiles = urls.count
@@ -188,12 +196,17 @@ class MainViewModel: ObservableObject {
             scanAllFileTypes: scanAllFileTypes,
             metadataParser: metadataParser
         ) { fileName, processed, total in
-            await MainActor.run {
-                self.currentFile = fileName
-                self.filesProcessed = processed
-                self.totalFiles = total
-                self.scanStatus = "Extracting metadata... (\(processed)/\(total))"
-                self.updateTimeEstimates()
+            // Only update UI if enough time has passed
+            let now = Date()
+            if now.timeIntervalSince(self.lastUIUpdate) >= self.uiUpdateInterval {
+                await MainActor.run {
+                    self.currentFile = fileName
+                    self.filesProcessed = processed
+                    self.totalFiles = total
+                    self.scanStatus = "Extracting metadata... (\(processed)/\(total))"
+                    self.updateTimeEstimates()
+                    self.lastUIUpdate = now
+                }
             }
         }
         
@@ -219,23 +232,11 @@ class MainViewModel: ObservableObject {
             totalSpaceSaved: totalSpaceSaved
         )
         
-        // Step 4: Detect similar scenes
-        currentPhase = .detectingScenes
-        scanStatus = "Detecting similar scenes..."
-        updateTimeEstimates()
-        
-        let sceneGroupInfos = try await dataActor.detectSimilarScenesForSession(
-            sessionID: sessionID,
-            fileTypeFilter: fileTypeFilter,
-            scanAllFileTypes: scanAllFileTypes,
-            sceneDetector: sceneDetector
-        )
-        
         currentPhase = .complete
         updateTimeEstimates()
         try await dataActor.updateSession(id: sessionID, status: .completed, endDate: Date())
         
-        scanStatus = "Processing complete! Found \(duplicateGroupInfos.count) duplicate groups and \(sceneGroupInfos.count) scene groups."
+        scanStatus = "Processing complete! Found \(duplicateGroupInfos.count) duplicate groups."
     }
     
     private func updateTimeEstimates() {
@@ -258,9 +259,7 @@ class MainViewModel: ObservableObject {
             let metadataProgress = filesProcessed > 0 ? Double(filesProcessed) / Double(totalFiles) : 0
             overallProgress = 0.15 + (metadataProgress * 0.4)
         case .checkingDuplicates:
-            overallProgress = 0.55 // Duplicate checking is about 30% after metadata
-        case .detectingScenes:
-            overallProgress = 0.85 // Scene detection is about 15%
+            overallProgress = 0.85 // Duplicate checking is about 45% after metadata
         case .complete:
             overallProgress = 1.0
         }

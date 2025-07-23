@@ -53,39 +53,45 @@ actor FileScanner {
             }
             
             let batchResults = await withTaskGroup(of: [(URL, Bool, Int)].self) { group in
-                group.addTask {
-                    var results: [(URL, Bool, Int)] = []
-                    
-                    for fileURL in batch {
-                        do {
-                            let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
-                            
-                            guard let isRegularFile = resourceValues.isRegularFile,
-                                  isRegularFile else {
+                // Process files in parallel chunks for better performance
+                let chunkSize = max(1, batch.count / PerformanceConfiguration.shared.maxConcurrentFileOperations)
+                let chunks = batch.chunked(into: chunkSize)
+                
+                for chunk in chunks {
+                    group.addTask {
+                        var results: [(URL, Bool, Int)] = []
+                        
+                        for fileURL in chunk {
+                            do {
+                                let resourceValues = try fileURL.resourceValues(forKeys: Set(resourceKeys))
+                                
+                                guard let isRegularFile = resourceValues.isRegularFile,
+                                      isRegularFile else {
+                                    continue
+                                }
+                                
+                                let fileSize = resourceValues.fileSize ?? 0
+                                var shouldIncludeFile = false
+                                
+                                // Include all regular files when scanning all types
+                                if scanAllTypes {
+                                    shouldIncludeFile = true
+                                } else if let contentType = resourceValues.contentType,
+                                         await self.isImageOrVideo(contentType: contentType) {
+                                    // Legacy mode: only images and videos
+                                    shouldIncludeFile = true
+                                }
+                                
+                                if shouldIncludeFile {
+                                    results.append((fileURL, true, fileSize))
+                                }
+                            } catch {
                                 continue
                             }
-                            
-                            let fileSize = resourceValues.fileSize ?? 0
-                            var shouldIncludeFile = false
-                            
-                            // Include all regular files when scanning all types
-                            if scanAllTypes {
-                                shouldIncludeFile = true
-                            } else if let contentType = resourceValues.contentType,
-                                     await self.isImageOrVideo(contentType: contentType) {
-                                // Legacy mode: only images and videos
-                                shouldIncludeFile = true
-                            }
-                            
-                            if shouldIncludeFile {
-                                results.append((fileURL, true, fileSize))
-                            }
-                        } catch {
-                            continue
                         }
+                        
+                        return results
                     }
-                    
-                    return results
                 }
                 
                 var allBatchResults: [(URL, Bool, Int)] = []

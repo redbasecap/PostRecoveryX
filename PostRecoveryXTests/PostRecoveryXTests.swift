@@ -21,7 +21,6 @@ struct PostRecoveryXTests {
             DuplicateGroup.self,
             OrganizationTask.self,
             ScanSession.self,
-            SimilarSceneGroup.self,
             PerformanceData.self
         ])
         
@@ -305,7 +304,6 @@ struct IntegrationTests {
                 DuplicateGroup.self,
                 OrganizationTask.self,
                 ScanSession.self,
-                SimilarSceneGroup.self,
                 PerformanceData.self
             ]),
             configurations: [ModelConfiguration(isStoredInMemoryOnly: true)]

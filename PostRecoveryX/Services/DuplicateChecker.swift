@@ -201,7 +201,7 @@ actor DuplicateChecker {
         defer { try? fileHandle.close() }
         
         var hasher = SHA256()
-        let bufferSize = 64 * 1024
+        let bufferSize = 1024 * 1024 // 1MB buffer for better I/O performance
         
         while true {
             if isCancelled {

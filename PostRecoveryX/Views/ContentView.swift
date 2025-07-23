@@ -21,12 +21,6 @@ struct ContentView: View {
                 }
                 .tag("duplicates")
             
-            SimilarScenesView()
-                .tabItem {
-                    Label("Similar Scenes", systemImage: "rectangle.stack")
-                }
-                .tag("scenes")
-            
             ThumbnailManagementView()
                 .tabItem {
                     Label("Thumbnails", systemImage: "photo.stack")
@@ -231,8 +225,6 @@ struct ScanView: View {
             return "info.circle"
         case .checkingDuplicates:
             return "square.on.square"
-        case .detectingScenes:
-            return "rectangle.stack"
         case .complete:
             return "checkmark.circle"
         }
@@ -254,7 +246,6 @@ struct ScanView: View {
             ScanSession.self,
             ScannedFile.self,
             DuplicateGroup.self,
-            OrganizationTask.self,
-            SimilarSceneGroup.self
+            OrganizationTask.self
         ], inMemory: true)
 }

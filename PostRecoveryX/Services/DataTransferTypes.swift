@@ -21,11 +21,6 @@ struct DuplicateGroupInfo: Sendable {
     let potentialSpaceSaved: Int64
 }
 
-struct SceneGroupInfo: Sendable {
-    let id: UUID
-    let fileCount: Int
-}
-
 // File type filtering support (Sendable version)
 struct SimpleFileTypeFilter: Sendable {
     let selectedTypes: Set<String>
