@@ -201,7 +201,12 @@ struct OptimizedDuplicateManagementView: View {
             // Apply sort
             switch sortOrder {
             case .spaceSaved:
-                descriptor.sortBy = [SortDescriptor(\.potentialSpaceSaved, order: .reverse)]
+                // Sort by fileSize * (fileCount - 1) which represents potential space saved
+                // Since we can't use computed properties, sort by fileSize and fileCount
+                descriptor.sortBy = [
+                    SortDescriptor(\.fileSize, order: .reverse),
+                    SortDescriptor(\.fileCount, order: .reverse)
+                ]
             case .fileCount:
                 descriptor.sortBy = [SortDescriptor(\.fileCount, order: .reverse)]
             case .fileSize:

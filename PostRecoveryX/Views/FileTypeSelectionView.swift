@@ -138,11 +138,13 @@ struct FileTypeSelectionView: View {
                 }
                 
                 Button("Process \(selectedFileCount) Files") {
+                    isProcessing = true
                     Task {
-                        isProcessing = true
                         await onComplete()
-                        isProcessing = false
-                        dismiss()
+                        await MainActor.run {
+                            isProcessing = false
+                            dismiss()
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -151,23 +153,18 @@ struct FileTypeSelectionView: View {
             .padding()
         }
         .frame(width: 800, height: 600)
-        .task {
-            await calculateFileTypeCounts()
+        .onAppear {
+            calculateFileTypeCounts()
         }
         .onChange(of: filter.enabledCategories) { _, _ in
-            Task {
-                await updateSelectedCount()
-            }
+            updateSelectedCount()
         }
         .onChange(of: filter.customExtensions) { _, _ in
-            Task {
-                await updateSelectedCount()
-            }
+            updateSelectedCount()
         }
     }
     
-    @MainActor
-    private func calculateFileTypeCounts() async {
+    private func calculateFileTypeCounts() {
         // Calculate total count from discovered counts
         totalFiles = discoveredFileTypeCounts.values.reduce(0, +)
         
@@ -184,11 +181,10 @@ struct FileTypeSelectionView: View {
         }
         
         categoryFileCounts = categoryCounts
-        await updateSelectedCount()
+        updateSelectedCount()
     }
     
-    @MainActor
-    private func updateSelectedCount() async {
+    private func updateSelectedCount() {
         var count = 0
         
         // Count files from enabled categories

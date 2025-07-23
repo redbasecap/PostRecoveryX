@@ -159,11 +159,12 @@ actor DataActor {
                                 .contentModificationDateKey
                             ])
                             
+                            let fileExtension = url.pathExtension.lowercased()
                             let metadata = FileMetadata(
                                 path: url.path,
                                 fileName: url.lastPathComponent,
                                 fileSize: Int64(resourceValues.fileSize ?? 0),
-                                fileType: resourceValues.contentType?.identifier ?? "unknown",
+                                fileType: fileExtension.isEmpty ? "unknown" : fileExtension,
                                 creationDate: resourceValues.creationDate,
                                 modificationDate: resourceValues.contentModificationDate
                             )
