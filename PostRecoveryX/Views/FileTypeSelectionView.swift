@@ -3,11 +3,12 @@ import SwiftData
 
 struct FileTypeSelectionView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var filter: FileTypeFilter = FileTypeFilter()
+    let discoveredFileTypeCounts: [String: Int]
     let onComplete: () async -> Void
     
     @State private var customExtension = ""
-    @State private var fileTypeCounts: [String: Int] = [:]
     @State private var isProcessing = false
     @State private var totalFiles: Int = 0
     @State private var selectedFileCount: Int = 0
@@ -167,11 +168,8 @@ struct FileTypeSelectionView: View {
     
     @MainActor
     private func calculateFileTypeCounts() async {
-        guard let modelContext = try? ModelContainer(for: ScannedFile.self).mainContext else { return }
-        
-        // Get total count
-        let totalDescriptor = FetchDescriptor<ScannedFile>()
-        totalFiles = (try? modelContext.fetchCount(totalDescriptor)) ?? 0
+        // Calculate total count from discovered counts
+        totalFiles = discoveredFileTypeCounts.values.reduce(0, +)
         
         // Get counts for each category
         var categoryCounts: [String: Int] = [:]
@@ -180,11 +178,7 @@ struct FileTypeSelectionView: View {
             var count = 0
             // Count files for each extension in the category
             for ext in category.extensions {
-                let predicate = #Predicate<ScannedFile> { file in
-                    file.fileType == ext
-                }
-                let descriptor = FetchDescriptor<ScannedFile>(predicate: predicate)
-                count += (try? modelContext.fetchCount(descriptor)) ?? 0
+                count += discoveredFileTypeCounts[ext, default: 0]
             }
             categoryCounts[category.id.uuidString] = count
         }
@@ -195,8 +189,6 @@ struct FileTypeSelectionView: View {
     
     @MainActor
     private func updateSelectedCount() async {
-        guard let modelContext = try? ModelContainer(for: ScannedFile.self).mainContext else { return }
-        
         var count = 0
         
         // Count files from enabled categories
@@ -206,11 +198,7 @@ struct FileTypeSelectionView: View {
         
         // Count files with custom extensions
         for ext in filter.customExtensions {
-            let predicate = #Predicate<ScannedFile> { file in
-                file.fileType == ext
-            }
-            let descriptor = FetchDescriptor<ScannedFile>(predicate: predicate)
-            count += (try? modelContext.fetchCount(descriptor)) ?? 0
+            count += discoveredFileTypeCounts[ext, default: 0]
         }
         
         selectedFileCount = count

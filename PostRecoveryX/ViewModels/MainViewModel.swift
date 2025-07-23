@@ -26,6 +26,7 @@ class MainViewModel: ObservableObject {
     @Published var enableVisualMatching = false // Default to OFF to avoid false positives
     @Published var showFileTypeSelection = false
     @Published var fileTypeFilter = SimpleFileTypeFilter()
+    @Published var discoveredFileTypeCounts: [String: Int] = [:]
     
     // Detailed progress tracking
     @Published var currentFile: String = ""
@@ -113,9 +114,16 @@ class MainViewModel: ObservableObject {
                 // Extract file types from scanned files
                 let fileTypes = fileInfos.compactMap { $0.fileType }.reduce(into: Set<String>()) { $0.insert($1) }
                 
+                // Calculate file type counts
+                var typeCounts: [String: Int] = [:]
+                for fileInfo in fileInfos {
+                    typeCounts[fileInfo.fileType, default: 0] += 1
+                }
+                
                 // Update file type filter with discovered types
                 await MainActor.run {
                     self.fileTypeFilter = self.fileTypeFilter.updateDiscoveredTypes(Array(fileTypes))
+                    self.discoveredFileTypeCounts = typeCounts
                     self.showFileTypeSelection = true
                 }
                 

@@ -265,6 +265,7 @@ struct ScanView: View {
         }
         .sheet(isPresented: $viewModel.showFileTypeSelection) {
             FileTypeSelectionView(
+                discoveredFileTypeCounts: viewModel.discoveredFileTypeCounts,
                 onComplete: {
                     await viewModel.processSelectedFileTypes()
                 }
