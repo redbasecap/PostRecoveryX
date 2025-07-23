@@ -74,8 +74,9 @@ python3 test_postrecoveryx.py --cleanup         # Clean test data
 ## Key Implementation Details
 
 ### File Type Support
-- **Images**: .jpg, .jpeg, .png, .heic, .raw, .tiff
-- **Videos**: .mp4, .mov, .avi
+- **Images**: .jpg, .jpeg, .png, .heic, .heif, .tiff, .tif, .bmp, .gif, .webp, .svg, .ico, .icns
+- **RAW Images**: .cr2, .cr3, .nef, .arw, .orf, .rw2, .dng, .raf, .srw, .crw, .raw
+- **Videos**: .mp4, .mov, .avi, .mkv, .wmv, .flv, .webm, .m4v, .mpg, .mpeg, .3gp
 
 ### Essential Frameworks and APIs
 ```swift

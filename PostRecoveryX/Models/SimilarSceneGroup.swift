@@ -12,6 +12,8 @@ final class SimilarSceneGroup {
     var timeRange: TimeInterval // Duration between first and last photo
     var averagePerceptualHash: UInt64?
     var locationInfo: String? // GPS or folder-based location
+    @Relationship(inverse: \ScanSession.similarSceneGroups)
+    var scanSession: ScanSession?
     
     init() {
         self.id = UUID()

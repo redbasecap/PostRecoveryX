@@ -14,7 +14,7 @@ actor SceneDetector {
     private let eventTimeThreshold: TimeInterval = 3600.0 // 1 hour
     private let visualSimilarityThreshold: Int = 12 // Hamming distance for perceptual hashes
     
-    func detectSimilarScenes(in files: [ScannedFile], modelContext: ModelContext) async throws -> [SimilarSceneGroup] {
+    func detectSimilarScenes(in files: [ScannedFile], modelContext: ModelContext, scanSession: ScanSession? = nil) async throws -> [SimilarSceneGroup] {
         isCancelled = false
         progress = Progress(totalUnitCount: Int64(files.count))
         
@@ -29,15 +29,15 @@ actor SceneDetector {
         var processedFiles = Set<UUID>()
         
         // First pass: Detect burst shots (very close timestamps)
-        let burstGroups = try await detectBurstShots(in: sortedFiles, processedFiles: &processedFiles)
+        let burstGroups = try await detectBurstShots(in: sortedFiles, processedFiles: &processedFiles, scanSession: scanSession)
         sceneGroups.append(contentsOf: burstGroups)
         
         // Second pass: Detect sequences (similar visual content + close timestamps)
-        let sequenceGroups = try await detectSequences(in: sortedFiles, processedFiles: &processedFiles)
+        let sequenceGroups = try await detectSequences(in: sortedFiles, processedFiles: &processedFiles, scanSession: scanSession)
         sceneGroups.append(contentsOf: sequenceGroups)
         
         // Third pass: Detect events (same location/folder + reasonable time range)
-        let eventGroups = try await detectEvents(in: sortedFiles, processedFiles: &processedFiles)
+        let eventGroups = try await detectEvents(in: sortedFiles, processedFiles: &processedFiles, scanSession: scanSession)
         sceneGroups.append(contentsOf: eventGroups)
         
         // Save all groups to the model context
@@ -59,7 +59,7 @@ actor SceneDetector {
         return sceneGroups
     }
     
-    private func detectBurstShots(in files: [ScannedFile], processedFiles: inout Set<UUID>) async throws -> [SimilarSceneGroup] {
+    private func detectBurstShots(in files: [ScannedFile], processedFiles: inout Set<UUID>, scanSession: ScanSession?) async throws -> [SimilarSceneGroup] {
         var burstGroups: [SimilarSceneGroup] = []
         var currentBurst: [ScannedFile] = []
         var lastDate: Date?
@@ -79,7 +79,7 @@ actor SceneDetector {
                 } else {
                     // End current burst and start new one
                     if currentBurst.count >= 3 { // Minimum 3 photos for a burst
-                        let group = createSceneGroup(from: currentBurst, type: .burst)
+                        let group = createSceneGroup(from: currentBurst, type: .burst, scanSession: scanSession)
                         burstGroups.append(group)
                         processedFiles.formUnion(currentBurst.map { $0.id })
                     }
@@ -95,7 +95,7 @@ actor SceneDetector {
         
         // Handle last burst
         if currentBurst.count >= 3 {
-            let group = createSceneGroup(from: currentBurst, type: .burst)
+            let group = createSceneGroup(from: currentBurst, type: .burst, scanSession: scanSession)
             burstGroups.append(group)
             processedFiles.formUnion(currentBurst.map { $0.id })
         }
@@ -103,7 +103,7 @@ actor SceneDetector {
         return burstGroups
     }
     
-    private func detectSequences(in files: [ScannedFile], processedFiles: inout Set<UUID>) async throws -> [SimilarSceneGroup] {
+    private func detectSequences(in files: [ScannedFile], processedFiles: inout Set<UUID>, scanSession: ScanSession?) async throws -> [SimilarSceneGroup] {
         var sequenceGroups: [SimilarSceneGroup] = []
         
         // Group unprocessed files by visual similarity
@@ -136,7 +136,7 @@ actor SceneDetector {
             }
             
             if sequenceFiles.count >= 2 { // Minimum 2 photos for a sequence
-                let group = createSceneGroup(from: sequenceFiles, type: .sequence)
+                let group = createSceneGroup(from: sequenceFiles, type: .sequence, scanSession: scanSession)
                 sequenceGroups.append(group)
                 processedFiles.formUnion(sequenceFiles.map { $0.id })
             }
@@ -145,7 +145,7 @@ actor SceneDetector {
         return sequenceGroups
     }
     
-    private func detectEvents(in files: [ScannedFile], processedFiles: inout Set<UUID>) async throws -> [SimilarSceneGroup] {
+    private func detectEvents(in files: [ScannedFile], processedFiles: inout Set<UUID>, scanSession: ScanSession?) async throws -> [SimilarSceneGroup] {
         var eventGroups: [SimilarSceneGroup] = []
         
         // Group unprocessed files by folder and time
@@ -183,7 +183,7 @@ actor SceneDetector {
                     } else {
                         // Gap too large, save current event and start new one
                         if eventFiles.count >= 5 {
-                            let group = createSceneGroup(from: eventFiles, type: .event)
+                            let group = createSceneGroup(from: eventFiles, type: .event, scanSession: scanSession)
                             group.locationInfo = URL(fileURLWithPath: folder).lastPathComponent
                             eventGroups.append(group)
                             processedFiles.formUnion(eventFiles.map { $0.id })
@@ -199,7 +199,7 @@ actor SceneDetector {
             
             // Handle last event in folder
             if eventFiles.count >= 5 {
-                let group = createSceneGroup(from: eventFiles, type: .event)
+                let group = createSceneGroup(from: eventFiles, type: .event, scanSession: scanSession)
                 group.locationInfo = URL(fileURLWithPath: folder).lastPathComponent
                 eventGroups.append(group)
                 processedFiles.formUnion(eventFiles.map { $0.id })
@@ -209,11 +209,12 @@ actor SceneDetector {
         return eventGroups
     }
     
-    private func createSceneGroup(from files: [ScannedFile], type: SceneGroupType) -> SimilarSceneGroup {
+    private func createSceneGroup(from files: [ScannedFile], type: SceneGroupType, scanSession: ScanSession? = nil) -> SimilarSceneGroup {
         let group = SimilarSceneGroup()
         group.groupType = type
         group.files = files
         group.fileCount = files.count
+        group.scanSession = scanSession
         
         // Calculate time range
         let dates = files.compactMap { $0.originalCreationDate ?? $0.creationDate }

@@ -14,6 +14,7 @@ final class ScanSession {
     var status: SessionStatus
     var error: String?
     var scannedFiles: [ScannedFile] = []
+    var similarSceneGroups: [SimilarSceneGroup] = []
     
     init(scanPath: String) {
         self.id = UUID()

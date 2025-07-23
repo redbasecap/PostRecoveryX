@@ -29,58 +29,8 @@ struct FileTypeCategory: Identifiable, Hashable {
         extensions: ["mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "3gp"]
     )
     
-    static let documents = FileTypeCategory(
-        name: "Documents",
-        systemImage: "doc.text",
-        types: [.pdf, .text, .rtf, .plainText],
-        extensions: ["pdf", "txt", "rtf", "doc", "docx", "odt", "tex", "md"]
-    )
-    
-    static let spreadsheets = FileTypeCategory(
-        name: "Spreadsheets",
-        systemImage: "tablecells",
-        types: [.spreadsheet],
-        extensions: ["xls", "xlsx", "csv", "ods", "numbers"]
-    )
-    
-    static let presentations = FileTypeCategory(
-        name: "Presentations",
-        systemImage: "play.rectangle",
-        types: [.presentation],
-        extensions: ["ppt", "pptx", "odp", "key"]
-    )
-    
-    static let archives = FileTypeCategory(
-        name: "Archives",
-        systemImage: "archivebox",
-        types: [.zip, .archive],
-        extensions: ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "dmg", "iso"]
-    )
-    
-    static let audio = FileTypeCategory(
-        name: "Audio",
-        systemImage: "music.note",
-        types: [.audio, .mp3, .mpeg4Audio],
-        extensions: ["mp3", "wav", "flac", "aac", "m4a", "ogg", "wma", "aiff", "ape", "opus"]
-    )
-    
-    static let code = FileTypeCategory(
-        name: "Code",
-        systemImage: "chevron.left.forwardslash.chevron.right",
-        types: [.sourceCode],
-        extensions: ["swift", "js", "py", "java", "cpp", "c", "h", "m", "go", "rb", "php", "html", "css", "json", "xml", "yaml", "yml"]
-    )
-    
-    static let data = FileTypeCategory(
-        name: "Data Files",
-        systemImage: "cylinder.split.1x2",
-        types: [.database, .data],
-        extensions: ["db", "sqlite", "mdb", "accdb", "dbf", "sql"]
-    )
-    
     static let allCategories: [FileTypeCategory] = [
-        .images, .rawImages, .videos, .documents, .spreadsheets,
-        .presentations, .archives, .audio, .code, .data
+        .images, .rawImages, .videos
     ]
     
     func matches(fileType: String) -> Bool {

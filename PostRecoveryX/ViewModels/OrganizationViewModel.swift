@@ -54,7 +54,12 @@ class OrganizationViewModel: ObservableObject {
             let descriptor = FetchDescriptor<ScannedFile>(
                 predicate: #Predicate { file in
                     file.isProcessed && (file.originalCreationDate != nil || file.creationDate != nil)
-                }
+                },
+                sortBy: [
+                    SortDescriptor(\.originalCreationDate),
+                    SortDescriptor(\.creationDate),
+                    SortDescriptor(\.path)
+                ]
             )
             
             let totalCount = try modelContext.fetchCount(descriptor)

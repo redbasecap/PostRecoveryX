@@ -3,12 +3,21 @@ import SwiftData
 
 struct SimilarScenesView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \SimilarSceneGroup.createdDate, order: .reverse) private var sceneGroups: [SimilarSceneGroup]
+    @EnvironmentObject var viewModel: MainViewModel
+    @Query private var allSceneGroups: [SimilarSceneGroup]
     
     @State private var selectedGroup: SimilarSceneGroup?
     @State private var showingGroupDetail = false
     @State private var filterType: SceneGroupType?
     @State private var sortOrder = SortOrder.date
+    
+    private var sceneGroups: [SimilarSceneGroup] {
+        // Filter to show only groups from current scan session
+        guard let currentSessionID = viewModel.currentSessionID else {
+            return []
+        }
+        return allSceneGroups.filter { $0.scanSession?.id == currentSessionID }
+    }
     
     enum SortOrder: String, CaseIterable {
         case date = "Date"

@@ -4,17 +4,8 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = MainViewModel()
-    @Query(sort: \ScanSession.startDate, order: .reverse) private var sessions: [ScanSession]
     @State private var duplicateGroupCount: Int = 0
     @State private var selectedTab = "scan"
-    @State private var showingSessionPrompt = false
-    @State private var hasCheckedForPreviousSession = false
-    
-    var lastIncompleteSession: ScanSession? {
-        sessions.first { session in
-            session.status == .scanning || session.status == .processing
-        }
-    }
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -47,55 +38,10 @@ struct ContentView: View {
                     Label("Organize", systemImage: "folder.badge.gearshape")
                 }
                 .tag("organize")
-            
-            HistoryView()
-                .tabItem {
-                    Label("History", systemImage: "clock")
-                }
-                .tag("history")
         }
         .onAppear {
             viewModel.setModelContext(modelContext)
-            checkForPreviousSession()
         }
-        .alert("Continue Previous Session?", isPresented: $showingSessionPrompt) {
-            Button("Continue") {
-                if let session = lastIncompleteSession {
-                    Task {
-                        await viewModel.continueSession(session)
-                        selectedTab = "scan"
-                    }
-                }
-            }
-            Button("Start Fresh", role: .cancel) {
-                if let session = lastIncompleteSession {
-                    Task {
-                        await clearIncompleteSession(session)
-                    }
-                }
-            }
-        } message: {
-            if let session = lastIncompleteSession {
-                let scannedCount = session.totalFilesProcessed
-                let status = session.status == .scanning ? "scanning" : "processing"
-                Text("Found an incomplete \(status) session from:\n\(session.scanPath)\n\nProgress: \(scannedCount) files scanned\nStarted: \(session.startDate.formatted())\n\nWould you like to continue where you left off?")
-            }
-        }
-    }
-    
-    private func checkForPreviousSession() {
-        guard !hasCheckedForPreviousSession else { return }
-        hasCheckedForPreviousSession = true
-        
-        if lastIncompleteSession != nil {
-            showingSessionPrompt = true
-        }
-    }
-    
-    private func clearIncompleteSession(_ session: ScanSession) async {
-        let container = modelContext.container
-        let dataActor = DataActor(modelContainer: container)
-        try? await dataActor.clearIncompleteSession(session.id)
     }
 }
 
@@ -301,78 +247,6 @@ struct ScanView: View {
     }
 }
 
-
-struct HistoryView: View {
-    @Query(sort: \ScanSession.startDate, order: .reverse) private var sessions: [ScanSession]
-    
-    var body: some View {
-        NavigationStack {
-            if sessions.isEmpty {
-                ContentUnavailableView("No Scan History", 
-                                     systemImage: "clock",
-                                     description: Text("Your scan history will appear here"))
-            } else {
-                List(sessions) { session in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(session.scanPath)
-                                .font(.headline)
-                            Spacer()
-                            StatusBadge(status: session.status)
-                        }
-                        
-                        HStack {
-                            Text("Started: \(session.startDate.formatted())")
-                            if let duration = session.formattedDuration {
-                                Text("• Duration: \(duration)")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        
-                        HStack {
-                            Text("Files: \(session.totalFilesFound)")
-                            Text("• Duplicates: \(session.duplicatesFound)")
-                            if session.totalSpaceSaved > 0 {
-                                Text("• Saved: \(session.formattedSpaceSaved)")
-                            }
-                        }
-                        .font(.caption)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .navigationTitle("Scan History")
-            }
-        }
-    }
-}
-
-struct StatusBadge: View {
-    let status: SessionStatus
-    
-    var body: some View {
-        Text(status.rawValue)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(backgroundColor)
-            .foregroundColor(.white)
-            .cornerRadius(4)
-    }
-    
-    var backgroundColor: Color {
-        switch status {
-        case .scanning, .processing:
-            return .blue
-        case .completed:
-            return .green
-        case .failed:
-            return .red
-        case .cancelled:
-            return .orange
-        }
-    }
-}
 
 #Preview {
     ContentView()

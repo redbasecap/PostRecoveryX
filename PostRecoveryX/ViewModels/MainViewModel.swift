@@ -283,25 +283,6 @@ class MainViewModel: ObservableObject {
         _ = PerformanceMonitor.shared.estimateTimeRemaining(totalFiles: totalFiles)
     }
     
-    func continueSession(_ session: ScanSession) async {
-        currentSessionID = session.id
-        scanPath = session.scanPath
-        
-        // Update UI to show session info
-        scanStatus = "Continuing previous scan..."
-        
-        // The duplicate groups and files are already in the database,
-        // so the DuplicateManagementView will show them automatically
-        
-        // Update session to mark it as viewed
-        if let dataActor = dataActor {
-            try? await dataActor.updateSession(
-                id: session.id,
-                status: .completed,
-                endDate: session.endDate ?? Date()
-            )
-        }
-    }
     
     func cancelScan() async {
         // Cancel operations
