@@ -10,8 +10,15 @@ struct OptimizedDuplicateManagementView: View {
     @State private var totalGroups = 0
     @State private var sortOrder = SortOrder.spaceSaved
     @State private var filterMinSize: Int64 = 0
+    @State private var showingBulkResolution = false
+    @State private var bulkResolutionProgress: BulkResolutionService.ProgressInfo?
+    @State private var isBulkProcessing = false
+    @State private var bulkResolutionResult: String?
     
     private let pageSize = 50
+    private var bulkResolutionService: BulkResolutionService {
+        BulkResolutionService(container: modelContext.container)
+    }
     
     enum SortOrder: String, CaseIterable {
         case spaceSaved = "Space Saved"
@@ -100,9 +107,50 @@ struct OptimizedDuplicateManagementView: View {
                 
                 Spacer()
                 
+                // Bulk Resolution Menu
+                Menu {
+                    Section("Resolve All Duplicates") {
+                        ForEach(BulkResolutionService.BulkResolutionStrategy.allCases, id: \.self) { strategy in
+                            Button(action: {
+                                Task {
+                                    await performBulkResolution(using: strategy)
+                                }
+                            }) {
+                                VStack(alignment: .leading) {
+                                    Text(strategy.rawValue)
+                                    Text(strategy.description)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .disabled(isBulkProcessing || duplicateGroups.isEmpty)
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    Button("Undo All Resolutions") {
+                        Task {
+                            await undoAllResolutions()
+                        }
+                    }
+                    .disabled(isBulkProcessing)
+                    
+                    Button("Apply Resolutions (Move to Trash)") {
+                        Task {
+                            await applyAllResolutions()
+                        }
+                    }
+                    .disabled(isBulkProcessing)
+                } label: {
+                    Label("Bulk Actions", systemImage: "square.stack.3d.up.fill")
+                }
+                .disabled(isBulkProcessing)
+                
                 Button("Refresh") {
                     Task { await loadDuplicateGroups() }
                 }
+                .disabled(isBulkProcessing)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -148,6 +196,51 @@ struct OptimizedDuplicateManagementView: View {
         }
         .sheet(item: $selectedGroup) { group in
             DuplicateDetailView(group: group)
+        }
+        .overlay {
+            if isBulkProcessing, let progress = bulkResolutionProgress {
+                ZStack {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        
+                        Text("Processing Duplicates")
+                            .font(.title2)
+                            .bold()
+                        
+                        Text(progress.currentGroup ?? "Preparing...")
+                            .foregroundColor(.secondary)
+                        
+                        ProgressView(value: progress.percentage, total: 100)
+                            .frame(width: 300)
+                        
+                        Text("\(Int(progress.percentage))%")
+                            .font(.headline)
+                            .monospacedDigit()
+                        
+                        Button("Cancel") {
+                            isBulkProcessing = false
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(40)
+                    .background(Color(NSColor.windowBackgroundColor))
+                    .cornerRadius(16)
+                    .shadow(radius: 20)
+                }
+            }
+        }
+        .alert("Bulk Resolution Result", isPresented: .constant(bulkResolutionResult != nil)) {
+            Button("OK") {
+                bulkResolutionResult = nil
+            }
+        } message: {
+            if let result = bulkResolutionResult {
+                Text(result)
+            }
         }
     }
     
@@ -225,6 +318,74 @@ struct OptimizedDuplicateManagementView: View {
                 self.isLoading = false
             }
         }
+    }
+    
+    private func performBulkResolution(using strategy: BulkResolutionService.BulkResolutionStrategy) async {
+        isBulkProcessing = true
+        bulkResolutionProgress = BulkResolutionService.ProgressInfo(processed: 0, total: 100, currentGroup: "Starting...")
+        
+        do {
+            let (resolved, spaceSaved) = try await bulkResolutionService.resolveAllDuplicates(
+                using: strategy
+            ) { progress in
+                DispatchQueue.main.async {
+                    self.bulkResolutionProgress = progress
+                }
+            }
+            
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            let spaceSavedString = formatter.string(fromByteCount: spaceSaved)
+            
+            bulkResolutionResult = "Successfully resolved \(resolved) duplicate groups.\n\nPotential space savings: \(spaceSavedString)"
+            
+            // Reload the view
+            await loadDuplicateGroups()
+        } catch {
+            bulkResolutionResult = "Failed to resolve duplicates: \(error.localizedDescription)"
+        }
+        
+        isBulkProcessing = false
+        bulkResolutionProgress = nil
+    }
+    
+    private func undoAllResolutions() async {
+        isBulkProcessing = true
+        
+        do {
+            let undoneCount = try await bulkResolutionService.undoAllResolutions()
+            bulkResolutionResult = "Successfully undid \(undoneCount) resolutions."
+            
+            // Reload the view
+            await loadDuplicateGroups()
+        } catch {
+            bulkResolutionResult = "Failed to undo resolutions: \(error.localizedDescription)"
+        }
+        
+        isBulkProcessing = false
+    }
+    
+    private func applyAllResolutions() async {
+        isBulkProcessing = true
+        bulkResolutionProgress = BulkResolutionService.ProgressInfo(processed: 0, total: 100, currentGroup: "Applying resolutions...")
+        
+        do {
+            let (processed, errors) = try await bulkResolutionService.applyResolutions(deleteFiles: true)
+            
+            if errors.isEmpty {
+                bulkResolutionResult = "Successfully moved \(processed) duplicate files to trash."
+            } else {
+                bulkResolutionResult = "Moved \(processed) files to trash.\n\nErrors:\n\(errors.prefix(5).joined(separator: "\n"))"
+            }
+            
+            // Reload the view
+            await loadDuplicateGroups()
+        } catch {
+            bulkResolutionResult = "Failed to apply resolutions: \(error.localizedDescription)"
+        }
+        
+        isBulkProcessing = false
+        bulkResolutionProgress = nil
     }
 }
 

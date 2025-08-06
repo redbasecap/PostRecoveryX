@@ -4,6 +4,7 @@ import Charts
 struct PerformanceDashboardView: View {
     @StateObject private var monitor = PerformanceMonitor.shared
     @State private var selectedMetric: MetricType = .cpu
+    @State private var showFullDashboard = false
     @Environment(\.dismiss) private var dismiss
     
     enum MetricType: String, CaseIterable {
@@ -32,6 +33,115 @@ struct PerformanceDashboardView: View {
     }
     
     var body: some View {
+        GeometryReader { geometry in
+            if geometry.size.height < 400 {
+                // Compact view for embedded context
+                compactView
+            } else {
+                // Full view for standalone window
+                fullView
+            }
+        }
+        .sheet(isPresented: $showFullDashboard) {
+            fullDashboardWindow
+        }
+    }
+    
+    private var compactView: some View {
+        HStack(spacing: 20) {
+            // Left side - Current metrics in a grid
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Performance Monitor", systemImage: "chart.line.uptrend.xyaxis")
+                        .font(.headline)
+                    
+                    Spacer()
+                    
+                    Button("Expand", systemImage: "arrow.up.left.and.arrow.down.right") {
+                        showFullDashboard = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                }
+                
+                if let snapshot = monitor.currentSnapshot {
+                    // Two rows of metrics
+                    HStack(spacing: 20) {
+                        CompactMetricCard(
+                            title: "CPU Usage",
+                            value: snapshot.formattedCPU,
+                            icon: "cpu",
+                            color: .blue,
+                            progress: snapshot.cpuUsage
+                        )
+                        
+                        CompactMetricCard(
+                            title: "Memory Usage",
+                            value: snapshot.formattedMemory,
+                            icon: "memorychip",
+                            color: .green,
+                            progress: snapshot.memoryUsage / Double(ProcessInfo.processInfo.physicalMemory)
+                        )
+                    }
+                    
+                    HStack(spacing: 20) {
+                        CompactMetricCard(
+                            title: "Processing Speed",
+                            value: snapshot.formattedFilesPerSecond,
+                            icon: "speedometer",
+                            color: .orange,
+                            progress: min(snapshot.filesProcessedPerSecond / 100, 1.0)
+                        )
+                        
+                        CompactMetricCard(
+                            title: "Queue Depth",
+                            value: "\(snapshot.queueDepth) files",
+                            icon: "tray.full",
+                            color: .purple,
+                            progress: min(Double(snapshot.queueDepth) / 1000, 1.0)
+                        )
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            
+            Divider()
+            
+            // Right side - Compact chart
+            VStack(spacing: 8) {
+                Picker("", selection: $selectedMetric) {
+                    ForEach(MetricType.allCases, id: \.self) { metric in
+                        Image(systemName: metric.icon)
+                            .tag(metric)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                
+                if !monitor.metrics.snapshots.isEmpty {
+                    CompactPerformanceChart(
+                        snapshots: monitor.metrics.snapshots,
+                        metricType: selectedMetric
+                    )
+                } else {
+                    VStack {
+                        Spacer()
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No data yet")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding()
+    }
+    
+    private var fullView: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
@@ -51,11 +161,6 @@ struct PerformanceDashboardView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                
-                Button("Close") {
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
             }
             .padding()
             
@@ -190,7 +295,68 @@ struct PerformanceDashboardView: View {
                 .frame(minWidth: 400)
             }
         }
+    }
+    
+    private var fullDashboardWindow: some View {
+        VStack(spacing: 0) {
+            // Header with close button
+            HStack {
+                Label("Performance Monitor", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.title2)
+                    .bold()
+                
+                Spacer()
+                
+                if monitor.isMonitoring {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("Monitoring")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Button("Close") {
+                    showFullDashboard = false
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+            
+            Divider()
+            
+            fullView
+        }
         .frame(minWidth: 700, minHeight: 500)
+    }
+}
+
+struct CompactMetricCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    let progress: Double
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            CircularProgressView(progress: progress, color: color)
+                .frame(width: 36, height: 36)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text(value)
+                    .font(.caption)
+                    .bold()
+            }
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -242,6 +408,49 @@ struct CircularProgressView: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.3), value: progress)
         }
+    }
+}
+
+struct CompactPerformanceChart: View {
+    let snapshots: [PerformanceSnapshot]
+    let metricType: PerformanceDashboardView.MetricType
+    
+    private var data: [(date: Date, value: Double)] {
+        snapshots.suffix(50).map { snapshot in
+            let value: Double
+            switch metricType {
+            case .cpu:
+                value = snapshot.cpuUsage * 100
+            case .memory:
+                value = snapshot.memoryUsage / (1024 * 1024 * 1024) // Convert to GB
+            case .filesPerSecond:
+                value = snapshot.filesProcessedPerSecond
+            case .diskIO:
+                value = snapshot.diskUsage / (1024 * 1024) // Convert to MB
+            }
+            return (snapshot.timestamp, value)
+        }
+    }
+    
+    var body: some View {
+        Chart(data, id: \.date) { item in
+            LineMark(
+                x: .value("Time", item.date),
+                y: .value("Value", item.value)
+            )
+            .foregroundStyle(metricType.color)
+            .interpolationMethod(.catmullRom)
+            
+            AreaMark(
+                x: .value("Time", item.date),
+                y: .value("Value", item.value)
+            )
+            .foregroundStyle(metricType.color.opacity(0.1))
+            .interpolationMethod(.catmullRom)
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .frame(height: 100)
     }
 }
 

@@ -6,8 +6,10 @@ import UniformTypeIdentifiers
 actor DuplicateChecker {
     private var hashCache: [String: String] = [:]
     private var perceptualHashCache: [String: PerceptualHash] = [:]
+    private var gxHashCache: [String: GxPerceptualHash] = [:]
     private var enhancedHashCache: [String: EnhancedImageHash] = [:]
     private let imageHasher = ImageHasher()
+    private let gxImageHasher = GxImageHasher()
     private let enhancedHasher = EnhancedImageHasher()
     private var isCancelled = false
     private var progress: Progress?
@@ -236,6 +238,20 @@ actor DuplicateChecker {
         return hash
     }
     
+    func computeGxPerceptualHash(for file: ScannedFile) async throws -> GxPerceptualHash? {
+        if let cachedHash = gxHashCache[file.path] {
+            return cachedHash
+        }
+        
+        let url = URL(fileURLWithPath: file.path)
+        guard let hash = try await gxImageHasher.computeHash(for: url) else {
+            return nil
+        }
+        
+        gxHashCache[file.path] = hash
+        return hash
+    }
+    
     func cancel() {
         isCancelled = true
     }
@@ -261,6 +277,7 @@ actor DuplicateChecker {
     func clearCache() {
         hashCache.removeAll()
         perceptualHashCache.removeAll()
+        gxHashCache.removeAll()
         enhancedHashCache.removeAll()
     }
 }

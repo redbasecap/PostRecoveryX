@@ -64,6 +64,15 @@ extension DuplicateGroup {
         files.max { $0.metadataQualityScore < $1.metadataQualityScore }
     }
     
+    var highestResolutionFile: ScannedFile? {
+        // Return file with highest resolution (width * height)
+        files.max { file1, file2 in
+            let resolution1 = (file1.width ?? 0) * (file1.height ?? 0)
+            let resolution2 = (file2.width ?? 0) * (file2.height ?? 0)
+            return resolution1 < resolution2
+        }
+    }
+    
     var hasLowQualityFiles: Bool {
         // Check if any files are likely thumbnails or low quality
         files.contains { $0.isThumbnail || $0.isPotentialThumbnail || $0.metadataQualityScore < 30 }

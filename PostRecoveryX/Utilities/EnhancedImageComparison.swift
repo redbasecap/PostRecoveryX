@@ -97,6 +97,7 @@ struct EnhancedImageHash {
 class EnhancedImageHasher {
     private let context = CIContext()
     private let imageHasher = ImageHasher()
+    private let gxEnhancedHasher = GxEnhancedImageHasher()
     
     func computeEnhancedHash(for url: URL) async throws -> EnhancedImageHash? {
         guard let image = NSImage(contentsOf: url) else { return nil }
